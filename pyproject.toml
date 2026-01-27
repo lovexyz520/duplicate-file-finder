@@ -1,0 +1,9 @@
+[project]
+name = "duplicate-file-finder"
+version = "0.1.0"
+description = "比對兩個資料夾，找出並移動重複的檔案"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "xxhash>=3.6.0",
+]
