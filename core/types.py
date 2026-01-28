@@ -26,6 +26,8 @@ class DuplicateAction:
     duplicate: FileInfo
     keep_path: str
     move_path: str | None
+    desired_move_path: str | None
+    name_conflict: bool
     action: str
     strategy: str
     partial_hash: str

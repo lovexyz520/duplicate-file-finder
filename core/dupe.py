@@ -57,6 +57,8 @@ def find_duplicates_between(
             full_cache[file2.path] = h2
 
         for file1 in matching_files1:
+            if file1.path == file2.path:
+                continue
             h1 = full_cache.get(file1.path)
             if h1 is None:
                 h1 = full_hash(file1.path, algo=full_hash_algo)
@@ -76,3 +78,41 @@ def find_duplicates_between(
                 break
 
     return matches
+
+
+def group_duplicates(
+    files: list[FileInfo],
+    partial_bytes: int,
+    full_hash_algo: str = "sha256",
+) -> list[list[FileInfo]]:
+    size_index = _index_by_size(files)
+    duplicate_groups: list[list[FileInfo]] = []
+
+    for size, same_size_files in size_index.items():
+        if len(same_size_files) < 2:
+            continue
+        partial_groups: dict[str, list[FileInfo]] = defaultdict(list)
+        for info in same_size_files:
+            ph = partial_hash(info.path, partial_bytes)
+            if ph is None:
+                continue
+            partial_groups[ph].append(info)
+
+        full_cache: dict[str, str] = {}
+        for partial_group in partial_groups.values():
+            if len(partial_group) < 2:
+                continue
+            full_groups: dict[str, list[FileInfo]] = defaultdict(list)
+            for info in partial_group:
+                h = full_cache.get(info.path)
+                if h is None:
+                    h = full_hash(info.path, algo=full_hash_algo)
+                    if h is None:
+                        continue
+                    full_cache[info.path] = h
+                full_groups[h].append(info)
+            for group in full_groups.values():
+                if len(group) > 1:
+                    duplicate_groups.append(group)
+
+    return duplicate_groups

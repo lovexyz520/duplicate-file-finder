@@ -34,6 +34,25 @@ uv run find_duplicates.py --keep-strategy latest
 uv run find_duplicates.py --keep-strategy earliest
 uv run find_duplicates.py --keep-strategy prefer-path --prefer-path "C:\主資料庫"
 uv run find_duplicates.py --keep-strategy latest --move-scope both
+
+# 檔名清理（移除(1)/(2)、空白正規化、移除特殊字元、衝突補 _001）
+uv run find_duplicates.py --clean-names
+```
+
+## 工作檔案整理助手（CLI）
+
+```bash
+# 基本整理（依副檔名分類）
+uv run organize_files.py "C:\Downloads" -o "C:\Organized"
+
+# 遞迴掃描 + 時間分層
+uv run organize_files.py "C:\Downloads" -o "C:\Organized" -r --time-partition
+
+# 啟用檔名清理
+uv run organize_files.py "C:\Downloads" -o "C:\Organized" --clean-names
+
+# 跳過重複檔案偵測
+uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 ```
 
 ## 參數說明
@@ -51,6 +70,11 @@ uv run find_duplicates.py --keep-strategy latest --move-scope both
 | `--keep-strategy` | 保留策略（`folder1`/`folder2`/`latest`/`earliest`/`prefer-path`） |
 | `--prefer-path` | 保留策略為 `prefer-path` 時指定路徑前綴 |
 | `--move-scope` | 移動範圍（`folder2`/`both`；預設只移動 folder2） |
+| `--clean-names` | 啟用檔名清理（移除(1)/(2)、空白正規化、移除特殊字元、衝突補 _001） |
+| `--clean-copy-suffix` | 移除檔名結尾的 (1)/(2) 等副本後綴 |
+| `--clean-normalize-space` | 空白正規化（多空白合併為一個） |
+| `--clean-remove-special` | 移除檔名中的特殊字元 |
+| `--clean-conflict-width` | 命名衝突自動補碼位數（預設: clean-names=3，其餘=1） |
 
 ## 運作原理
 
@@ -59,6 +83,33 @@ uv run find_duplicates.py --keep-strategy latest --move-scope both
 3. 對相同大小的檔案計算 partial hash（前/後 1MB 的 xxhash）
 4. partial hash 相同時進行完整 SHA256
 5. 將 folder2 中的重複檔案移動到輸出資料夾
+
+## 工作檔案整理分類規則（WORK_PRESET）
+
+| 類別 | 副檔名 |
+|------|------|
+| Docs | doc, docx, txt, md |
+| PDF | pdf |
+| Sheets | xls, xlsx, csv |
+| Slides | ppt, pptx |
+| Images | jpg, jpeg, png, gif, bmp, tiff, webp |
+| Videos | mp4, mov, avi, mkv |
+| Archives | zip, rar, 7z, tar, gz |
+| Code | py, js, json, ts, html, css, yml, yaml |
+| Others | 其他未列出副檔名 |
+
+## 整理報表說明
+
+`organize_report.csv` 會輸出到輸出資料夾，欄位如下：
+
+| 欄位 | 說明 |
+|------|------|
+| `source_path` | 原始檔案路徑 |
+| `dest_path` | 整理後路徑 |
+| `desired_dest_path` | 原本想移動到的路徑（若有命名衝突） |
+| `category` | 分類桶 |
+| `action` | `preview` / `moved` |
+| `name_conflict` | 是否發生命名衝突（1/0） |
 
 ## 報表說明
 
@@ -81,6 +132,8 @@ uv run find_duplicates.py --keep-strategy latest --move-scope both
 | `strategy` | 使用的保留策略 |
 | `keep_path` | 被保留的檔案路徑 |
 | `move_path` | 被移動的檔案路徑 |
+| `desired_move_path` | 原本想移動到的路徑（若有命名衝突） |
+| `name_conflict` | 是否發生命名衝突（1/0） |
 
 ### 範例
 

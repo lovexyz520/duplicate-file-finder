@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 
+from .naming import clean_filename, resolve_destination
 from .types import DuplicateAction, DuplicateMatch, FileInfo
 
 
@@ -39,6 +40,15 @@ def _pick_keep_file(
     return original
 
 
+def _clean_filename(
+    filename: str,
+    remove_copy_suffix: bool,
+    normalize_space: bool,
+    remove_special: bool,
+) -> str:
+    return clean_filename(filename, remove_copy_suffix, normalize_space, remove_special)
+
+
 def move_duplicates(
     matches: list[DuplicateMatch],
     output_folder: str,
@@ -46,6 +56,11 @@ def move_duplicates(
     keep_strategy: str = "folder1",
     prefer_path: str | None = None,
     move_scope: str = "folder2",
+    clean_names: bool = False,
+    clean_copy_suffix: bool = False,
+    clean_normalize_space: bool = False,
+    clean_remove_special: bool = False,
+    conflict_suffix_width: int = 3,
 ) -> tuple[int, list[DuplicateAction]]:
     os.makedirs(output_folder, exist_ok=True)
 
@@ -67,6 +82,8 @@ def move_duplicates(
                     duplicate=match.duplicate,
                     keep_path=keep_file.path,
                     move_path=None,
+                    desired_move_path=None,
+                    name_conflict=False,
                     action="kept_by_strategy",
                     strategy=keep_strategy,
                     partial_hash=match.partial_hash,
@@ -80,13 +97,20 @@ def move_duplicates(
         else:
             src = match.duplicate.path
 
-        dest = os.path.join(output_folder, os.path.basename(src))
-        if os.path.exists(dest):
-            base, ext = os.path.splitext(os.path.basename(src))
-            counter = 1
-            while os.path.exists(dest):
-                dest = os.path.join(output_folder, f"{base}_{counter}{ext}")
-                counter += 1
+        filename = os.path.basename(src)
+        if clean_names:
+            filename = _clean_filename(
+                filename,
+                remove_copy_suffix=clean_copy_suffix,
+                normalize_space=clean_normalize_space,
+                remove_special=clean_remove_special,
+            )
+
+        desired_dest, dest, name_conflict = resolve_destination(
+            output_folder,
+            filename,
+            conflict_suffix_width,
+        )
 
         if dry_run:
             action = "preview"
@@ -101,6 +125,8 @@ def move_duplicates(
                 duplicate=match.duplicate,
                 keep_path=keep_file.path,
                 move_path=dest,
+                desired_move_path=desired_dest,
+                name_conflict=name_conflict,
                 action=action,
                 strategy=keep_strategy,
                 partial_hash=match.partial_hash,

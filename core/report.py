@@ -29,7 +29,16 @@ def write_duplicates_report(
             "full_hash",
         ]
         if actions is not None:
-            header.extend(["action", "strategy", "keep_path", "move_path"])
+            header.extend(
+                [
+                    "action",
+                    "strategy",
+                    "keep_path",
+                    "move_path",
+                    "desired_move_path",
+                    "name_conflict",
+                ]
+            )
         writer.writerow(header)
 
         action_map = {}
@@ -53,7 +62,7 @@ def write_duplicates_report(
             if actions is not None:
                 action = action_map.get((match.original.path, match.duplicate.path))
                 if action is None:
-                    row.extend(["", "", "", ""])
+                    row.extend(["", "", "", "", "", ""])
                 else:
                     row.extend(
                         [
@@ -61,6 +70,8 @@ def write_duplicates_report(
                             action.strategy,
                             action.keep_path,
                             action.move_path or "",
+                            action.desired_move_path or "",
+                            "1" if action.name_conflict else "0",
                         ]
                     )
             writer.writerow(row)

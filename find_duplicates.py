@@ -98,6 +98,32 @@ def main():
         choices=["folder2", "both"],
         help="移動範圍（預設: folder2，只移動 folder2 的檔案）",
     )
+    parser.add_argument(
+        "--clean-names",
+        action="store_true",
+        help="啟用檔名清理（包含移除(1)/(2)、空白正規化、移除特殊字元、衝突補 _001）",
+    )
+    parser.add_argument(
+        "--clean-copy-suffix",
+        action="store_true",
+        help="移除檔名結尾的 (1)/(2) 等副本後綴",
+    )
+    parser.add_argument(
+        "--clean-normalize-space",
+        action="store_true",
+        help="空白正規化（多空白合併為一個）",
+    )
+    parser.add_argument(
+        "--clean-remove-special",
+        action="store_true",
+        help="移除檔名中的特殊字元",
+    )
+    parser.add_argument(
+        "--clean-conflict-width",
+        type=int,
+        default=None,
+        help="命名衝突自動補碼位數（預設: clean-names=3，其餘=1）",
+    )
 
     args = parser.parse_args()
 
@@ -149,6 +175,20 @@ def main():
     else:
         print(f"找到 {len(matches)} 個重複檔案")
 
+    clean_enabled = (
+        args.clean_names
+        or args.clean_copy_suffix
+        or args.clean_normalize_space
+        or args.clean_remove_special
+    )
+    clean_copy_suffix = args.clean_copy_suffix or args.clean_names
+    clean_normalize_space = args.clean_normalize_space or args.clean_names
+    clean_remove_special = args.clean_remove_special or args.clean_names
+    if args.clean_conflict_width is None:
+        conflict_width = 3 if clean_enabled else 1
+    else:
+        conflict_width = max(args.clean_conflict_width, 0)
+
     moved_count, operations = move_duplicates(
         matches,
         args.output,
@@ -156,24 +196,62 @@ def main():
         keep_strategy=args.keep_strategy,
         prefer_path=args.prefer_path,
         move_scope=args.move_scope,
+        clean_names=clean_enabled,
+        clean_copy_suffix=clean_copy_suffix,
+        clean_normalize_space=clean_normalize_space,
+        clean_remove_special=clean_remove_special,
+        conflict_suffix_width=conflict_width,
     )
+
+    moves: list[tuple[str, str]] = []
+    keeps: list[str] = []
+    conflicts: list[tuple[str, str, str]] = []
 
     for op in operations:
         if op.action == "kept_by_strategy":
-            print(f"[保留] {op.keep_path} (策略: {op.strategy})")
+            keeps.append(op.keep_path)
             continue
+
         if op.keep_path == op.duplicate.path:
             src = op.original.path
         else:
             src = op.duplicate.path
-        if args.dry_run:
-            print(f"[預覽] 將移動: {src} -> {op.move_path}")
-        else:
-            print(f"已移動: {src} -> {op.move_path}")
+        dest = op.move_path or ""
+        moves.append((src, dest))
+        if op.name_conflict and op.desired_move_path:
+            conflicts.append((src, op.desired_move_path, dest))
+
+    if keeps:
+        print("\n保留清單:")
+        for path in keeps:
+            print(f"[保留] {path} (策略: {args.keep_strategy})")
+
+    if moves:
+        print("\n移動清單:")
+        for src, dest in moves:
+            if args.dry_run:
+                print(f"[預覽] 將移動: {src} -> {dest}")
+            else:
+                print(f"已移動: {src} -> {dest}")
+
+    if conflicts:
+        print("\n檔名衝突清單:")
+        for src, desired, final in conflicts:
+            print(f"[衝突] {src} -> {desired} (改名為 {final})")
 
     report_path = args.report or os.path.join(args.output, "duplicates_report.csv")
     write_duplicates_report(matches, report_path, actions=operations)
     print(f"報表已輸出: {report_path}")
+
+    kept_count = len(keeps)
+    move_count = len(moves)
+    conflict_count = len(conflicts)
+    print(
+        f"\n摘要: 重複檔案 {len(matches)} 個，"
+        f"保留 {kept_count} 個，"
+        f"{'預覽移動' if args.dry_run else '移動'} {move_count} 個，"
+        f"命名衝突 {conflict_count} 個"
+    )
 
     if not args.dry_run:
         print(f"共移動 {moved_count} 個重複檔案")
