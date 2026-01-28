@@ -6,20 +6,21 @@ Duplicate File Finder - 重複檔案搜尋工具
 運作流程：
 1. 掃描兩個資料夾中的檔案
 2. 先比對檔案大小，大小不同則跳過（效能優化）
-3. 對相同大小的檔案計算 xxhash（比 MD5 快 5-10 倍）
-4. hash 相同時進行二進位比對確認
+3. 先做 partial hash（前/後 1MB 的 xxhash）
+4. partial hash 相同時做完整 SHA256
 5. 將 folder2 中的重複檔案移動到輸出資料夾
 
 使用方式：
     uv run find_duplicates.py [folder1] [folder2] [-o OUTPUT] [-r] [--dry-run]
+        [--partial-size-mb N] [--full-hash sha256|xxhash64]
+        [--keep-strategy folder1|folder2|latest|earliest|prefer-path]
+        [--prefer-path PATH] [--move-scope folder2|both]
 """
 
 import argparse
-import filecmp
 import os
-import shutil
 
-import xxhash
+from core import find_duplicates_between, move_duplicates, scan_folder, write_duplicates_report
 
 # 預設資料夾路徑
 DEFAULT_FOLDER1 = 'folder1'
@@ -30,29 +31,6 @@ DEFAULT_OUTPUT = 'output_folder'
 # folder1 = 'E://待整理 poto//mobile phone//手機備份//photo'
 # folder2 = 'E://待整理 poto//mobile phone//手機備份//photo'
 # output_folder = 'E://待整理 poto//mobile phone//手機備份//output_folder'
-
-
-def get_hash(filename):
-    """計算檔案的 xxhash 值（比 MD5 快 5-10 倍）
-
-    Returns:
-        str: 檔案的 hash 值，或 None 如果讀取失敗
-    """
-    try:
-        hasher = xxhash.xxh64()
-        with open(filename, 'rb') as f:
-            while True:
-                data = f.read(65536)  # 64KB chunks for better performance
-                if not data:
-                    break
-                hasher.update(data)
-        return hasher.hexdigest()
-    except PermissionError:
-        print(f"\n警告: 無法讀取檔案（權限不足）- {filename}")
-        return None
-    except OSError as e:
-        print(f"\n警告: 無法讀取檔案（{e.strerror}）- {filename}")
-        return None
 
 
 def check_overlapping_folders(folder1, folder2):
@@ -79,110 +57,6 @@ def check_overlapping_folders(folder1, folder2):
     return None
 
 
-def get_files_with_size(folder, recursive=False):
-    """取得資料夾下的所有檔案及其大小（排除子目錄）"""
-    files = []
-    if recursive:
-        for root, _, filenames in os.walk(folder):
-            for filename in filenames:
-                filepath = os.path.join(root, filename)
-                files.append((filepath, os.path.getsize(filepath)))
-    else:
-        for filename in os.listdir(folder):
-            filepath = os.path.join(folder, filename)
-            if os.path.isfile(filepath):
-                files.append((filepath, os.path.getsize(filepath)))
-    return files
-
-
-def find_duplicates(folder1, folder2, output_folder, recursive=False, dry_run=False):
-    """找出並移動重複檔案"""
-    # 確保輸出資料夾存在
-    os.makedirs(output_folder, exist_ok=True)
-
-    # 取得兩個資料夾下的所有檔案及大小
-    files1 = get_files_with_size(folder1, recursive)
-    files2 = get_files_with_size(folder2, recursive)
-
-    print(f"資料夾 1: {len(files1)} 個檔案")
-    print(f"資料夾 2: {len(files2)} 個檔案")
-
-    # 建立 folder1 的大小索引 {size: [filepath, ...]}
-    size_index1 = {}
-    for filepath, size in files1:
-        if size not in size_index1:
-            size_index1[size] = []
-        size_index1[size].append(filepath)
-
-    # 找出 folder2 中與 folder1 有相同大小的檔案
-    candidates = []
-    for filepath, size in files2:
-        if size in size_index1:
-            candidates.append((filepath, size, size_index1[size]))
-
-    print(f"相同大小的候選檔案: {len(candidates)} 個")
-
-    if not candidates:
-        print("沒有找到重複檔案")
-        return
-
-    print("正在計算 hash...")
-
-    # 計算 folder1 候選檔案的 hash（只計算有相同大小的）
-    hash_cache1 = {}
-    sizes_needed = set(c[1] for c in candidates)
-    files1_to_hash = [(f, s) for f, s in files1 if s in sizes_needed]
-
-    for i, (filepath, _) in enumerate(files1_to_hash, 1):
-        print(f"\r資料夾 1: {i}/{len(files1_to_hash)}", end="", flush=True)
-        file_hash = get_hash(filepath)
-        if file_hash is not None:
-            hash_cache1[filepath] = file_hash
-    print()
-
-    # 處理候選檔案
-    moved_count = 0
-    for i, (file2, size, matching_files1) in enumerate(candidates, 1):
-        print(f"\r資料夾 2: {i}/{len(candidates)}", end="", flush=True)
-
-        # 跳過同一個檔案
-        file2_abs = os.path.abspath(file2)
-
-        hash2 = get_hash(file2)
-        if hash2 is None:
-            continue  # 無法讀取檔案，跳過
-
-        for file1 in matching_files1:
-            if os.path.abspath(file1) == file2_abs:
-                continue
-
-            hash1 = hash_cache1.get(file1)
-            if hash1 is None or hash1 != hash2:
-                continue
-
-            # hash 相同，進行二進位比對確認
-            if filecmp.cmp(file1, file2, shallow=False):
-                dest = os.path.join(output_folder, os.path.basename(file2))
-
-                # 處理檔名衝突
-                if os.path.exists(dest):
-                    base, ext = os.path.splitext(os.path.basename(file2))
-                    counter = 1
-                    while os.path.exists(dest):
-                        dest = os.path.join(output_folder, f"{base}_{counter}{ext}")
-                        counter += 1
-
-                if dry_run:
-                    print(f"\n[預覽] 將移動: {file2} -> {dest}")
-                else:
-                    shutil.move(file2, dest)
-                    print(f"\n已移動: {file2} -> {dest}")
-                moved_count += 1
-                break  # 已找到重複，跳出內層迴圈
-
-    print(f"\n\n共處理 {len(candidates)} 個候選檔案，移動 {moved_count} 個重複檔案")
-
-
 def main():
     parser = argparse.ArgumentParser(description="比對兩個資料夾，找出並移動重複的檔案")
     parser.add_argument("folder1", nargs="?", default=DEFAULT_FOLDER1, help="第一個資料夾路徑")
@@ -190,8 +64,46 @@ def main():
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT, help="輸出資料夾路徑")
     parser.add_argument("-r", "--recursive", action="store_true", help="遞迴掃描子資料夾")
     parser.add_argument("--dry-run", action="store_true", help="預覽模式，不實際移動檔案")
+    parser.add_argument(
+        "--report",
+        default=None,
+        help="重複檔案報表輸出路徑（預設: output_folder/duplicates_report.csv）",
+    )
+    parser.add_argument(
+        "--partial-size-mb",
+        type=int,
+        default=1,
+        help="partial hash 讀取前/後的大小（MB，預設: 1）",
+    )
+    parser.add_argument(
+        "--full-hash",
+        default="sha256",
+        choices=["sha256", "xxhash64"],
+        help="完整 hash 演算法（預設: sha256）",
+    )
+    parser.add_argument(
+        "--keep-strategy",
+        default="folder1",
+        choices=["folder1", "folder2", "latest", "earliest", "prefer-path"],
+        help="重複檔案保留策略（預設: folder1）",
+    )
+    parser.add_argument(
+        "--prefer-path",
+        default=None,
+        help="保留策略為 prefer-path 時的路徑前綴",
+    )
+    parser.add_argument(
+        "--move-scope",
+        default="folder2",
+        choices=["folder2", "both"],
+        help="移動範圍（預設: folder2，只移動 folder2 的檔案）",
+    )
 
     args = parser.parse_args()
+
+    if args.keep_strategy == "prefer-path" and not args.prefer_path:
+        print("錯誤: keep-strategy=prefer-path 時必須提供 --prefer-path")
+        return
 
     # 檢查資料夾是否存在
     if not os.path.isdir(args.folder1):
@@ -219,7 +131,52 @@ def main():
             print("已取消")
             return
 
-    find_duplicates(args.folder1, args.folder2, args.output, args.recursive, args.dry_run)
+    files1 = scan_folder(args.folder1, args.recursive)
+    files2 = scan_folder(args.folder2, args.recursive)
+
+    print(f"資料夾 1: {len(files1)} 個檔案")
+    print(f"資料夾 2: {len(files2)} 個檔案")
+
+    matches = find_duplicates_between(
+        files1,
+        files2,
+        partial_bytes=max(args.partial_size_mb, 1) * 1024 * 1024,
+        full_hash_algo=args.full_hash,
+    )
+
+    if not matches:
+        print("沒有找到重複檔案")
+    else:
+        print(f"找到 {len(matches)} 個重複檔案")
+
+    moved_count, operations = move_duplicates(
+        matches,
+        args.output,
+        dry_run=args.dry_run,
+        keep_strategy=args.keep_strategy,
+        prefer_path=args.prefer_path,
+        move_scope=args.move_scope,
+    )
+
+    for op in operations:
+        if op.action == "kept_by_strategy":
+            print(f"[保留] {op.keep_path} (策略: {op.strategy})")
+            continue
+        if op.keep_path == op.duplicate.path:
+            src = op.original.path
+        else:
+            src = op.duplicate.path
+        if args.dry_run:
+            print(f"[預覽] 將移動: {src} -> {op.move_path}")
+        else:
+            print(f"已移動: {src} -> {op.move_path}")
+
+    report_path = args.report or os.path.join(args.output, "duplicates_report.csv")
+    write_duplicates_report(matches, report_path, actions=operations)
+    print(f"報表已輸出: {report_path}")
+
+    if not args.dry_run:
+        print(f"共移動 {moved_count} 個重複檔案")
 
 
 if __name__ == "__main__":

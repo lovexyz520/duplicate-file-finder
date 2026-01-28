@@ -16,3 +16,7 @@ wheels/
 folder1/
 folder2/
 output_folder/
+strategy_test/
+
+# Reports
+duplicates_report.csv

@@ -8,12 +8,19 @@
 
 - **語言**: Python 3.10+
 - **套件管理**: UV
-- **主要依賴**: xxhash（高效能 hash 演算法）
+- **主要依賴**: xxhash（partial hash / full hash 選項）+ hashlib（SHA256）
 
 ## 檔案結構
 
 ```
 duplicate-file-finder/
+├── core/                # 核心模組
+│   ├── actions.py       # 移動重複檔案 + 衝突命名處理
+│   ├── dupe.py          # 三層比對邏輯
+│   ├── hashers.py       # partial hash / full hash
+│   ├── report.py        # CSV 報表輸出
+│   ├── scanner.py       # 檔案掃描/metadata
+│   └── types.py         # 資料結構
 ├── find_duplicates.py    # 主程式
 ├── pyproject.toml        # UV 專案設定
 ├── uv.lock               # 依賴鎖定檔
@@ -28,8 +35,8 @@ duplicate-file-finder/
 ## 核心演算法
 
 1. **檔案大小過濾**: 先比對檔案大小，只有大小相同的檔案才進入下一步
-2. **xxhash 計算**: 使用 xxhash64 計算 hash，比 MD5 快 5-10 倍
-3. **二進位比對**: hash 相同時用 `filecmp.cmp()` 做最終確認
+2. **partial hash**: 前/後 1MB 用 xxhash64 計算
+3. **完整 hash**: partial hash 相同才計算 SHA256
 4. **檔名衝突處理**: 輸出資料夾有同名檔案時自動加上 `_1`, `_2` 後綴
 
 ## 開發指南
@@ -54,13 +61,19 @@ python find_duplicates.py --dry-run
 | `-o`, `--output` | 輸出資料夾（預設: `output_folder`） |
 | `-r`, `--recursive` | 遞迴掃描子資料夾 |
 | `--dry-run` | 預覽模式，不實際移動檔案 |
+| `--report` | 報表輸出路徑（預設: `output_folder/duplicates_report.csv`） |
+| `--partial-size-mb` | partial hash 讀取前/後大小（MB，預設: 1） |
+| `--full-hash` | 完整 hash 演算法（`sha256` 或 `xxhash64`） |
+| `--keep-strategy` | 保留策略（`folder1`/`folder2`/`latest`/`earliest`/`prefer-path`） |
+| `--prefer-path` | 保留策略為 `prefer-path` 時指定路徑前綴 |
+| `--move-scope` | 移動範圍（`folder2`/`both`；預設只移動 folder2） |
 
 ### 主要函數
 
-- `get_hash(filename)`: 計算檔案的 xxhash64 值（含錯誤處理）
-- `check_overlapping_folders(folder1, folder2)`: 檢查兩個資料夾是否重疊
-- `get_files_with_size(folder, recursive)`: 取得資料夾內所有檔案及其大小
-- `find_duplicates(...)`: 主要邏輯，找出並移動重複檔案
+- `scan_folder(folder, recursive)`: 掃描資料夾並回傳檔案 metadata
+- `find_duplicates_between(files1, files2, partial_bytes)`: 三層比對找出重複
+- `move_duplicates(matches, output_folder, dry_run)`: 移動重複檔案
+- `write_duplicates_report(matches, report_path)`: 產出 CSV 報表
 
 ## 注意事項
 
