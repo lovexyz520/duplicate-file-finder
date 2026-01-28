@@ -13,9 +13,9 @@ Last updated: 2026-01-28
 - [x] Documentation updates (README/CLAUDE)
 - [x] Tag and release prep: v1.1.0
 - [x] Work-file organizer CLI + presets + time partitioning + duplicates quarantine
+- [x] Streamlit UI (preview -> confirm -> execute)
 
 ## Next up
-- [ ] Streamlit UI (preview -> confirm -> execute)
 - [ ] Unit tests for core modules
 - [ ] Permission error test harness (Windows ACL/SID)
 

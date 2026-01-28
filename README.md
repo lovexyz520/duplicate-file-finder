@@ -1,6 +1,6 @@
 # Duplicate File Finder
 
-比對兩個資料夾，找出並移動重複的檔案。
+比對兩個資料夾，找出並移動重複檔案；並提供工作檔案整理助手（CLI / Streamlit）。
 
 ## 安裝
 
@@ -8,7 +8,7 @@
 uv sync
 ```
 
-## 使用方式
+## 重複檔案偵測（CLI）
 
 ```bash
 # 使用預設資料夾 (folder1, folder2 -> output_folder)
@@ -55,7 +55,13 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --clean-names
 uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 ```
 
-## 參數說明
+## Streamlit 介面
+
+```bash
+uv run streamlit run streamlit_app.py
+```
+
+## 參數說明（find_duplicates.py）
 
 | 參數 | 說明 |
 |------|------|
@@ -76,7 +82,7 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 | `--clean-remove-special` | 移除檔名中的特殊字元 |
 | `--clean-conflict-width` | 命名衝突自動補碼位數（預設: clean-names=3，其餘=1） |
 
-## 運作原理
+## 運作原理（重複檔案）
 
 1. 掃描兩個資料夾中的檔案
 2. 先比對檔案大小，大小不同則跳過
@@ -98,9 +104,7 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 | Code | py, js, json, ts, html, css, yml, yaml |
 | Others | 其他未列出副檔名 |
 
-## 整理報表說明
-
-`organize_report.csv` 會輸出到輸出資料夾，欄位如下：
+## 整理報表說明（organize_report.csv）
 
 | 欄位 | 說明 |
 |------|------|
@@ -111,11 +115,9 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 | `action` | `preview` / `moved` |
 | `name_conflict` | 是否發生命名衝突（1/0） |
 
-## 報表說明
+## 重複檔案報表說明（duplicates_report.csv）
 
-預設會輸出 `output_folder/duplicates_report.csv`，也可用 `--report` 指定路徑。
-
-### 欄位
+預設輸出 `output_folder/duplicates_report.csv`，可用 `--report` 指定路徑。
 
 | 欄位 | 說明 |
 |------|------|
@@ -128,16 +130,9 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 | `ctime_original` | 原始檔案的建立時間（timestamp） |
 | `partial_hash` | partial hash 值（前/後 1MB 的 xxhash） |
 | `full_hash` | 完整 hash 值（SHA256 或 xxhash64） |
-| `action` | 執行動作（`preview`/`moved`/`kept_by_strategy`） |
+| `action` | `preview` / `moved` / `kept_by_strategy` |
 | `strategy` | 使用的保留策略 |
 | `keep_path` | 被保留的檔案路徑 |
 | `move_path` | 被移動的檔案路徑 |
 | `desired_move_path` | 原本想移動到的路徑（若有命名衝突） |
 | `name_conflict` | 是否發生命名衝突（1/0） |
-
-### 範例
-
-```csv
-duplicate_path,original_path,size,mtime_duplicate,mtime_original,ctime_duplicate,ctime_original,partial_hash,full_hash,action,strategy,keep_path,move_path
-"C:\\B\\dup1.jpg","C:\\A\\dup1.jpg",1056234,1706371200,1706284800,1706371200,1706284800,ab12cd34,9f8e7d6c...,moved,folder1,"C:\\A\\dup1.jpg","C:\\Duplicates\\dup1.jpg"
-```

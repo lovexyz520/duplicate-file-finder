@@ -4,6 +4,7 @@ import csv
 import os
 
 from .types import DuplicateAction, DuplicateMatch
+from .types import OrganizeAction
 
 
 def write_duplicates_report(
@@ -75,3 +76,33 @@ def write_duplicates_report(
                         ]
                     )
             writer.writerow(row)
+
+
+def write_organize_report(actions: list[OrganizeAction], report_path: str) -> None:
+    report_dir = os.path.dirname(report_path)
+    if report_dir:
+        os.makedirs(report_dir, exist_ok=True)
+
+    with open(report_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [
+                "source_path",
+                "dest_path",
+                "desired_dest_path",
+                "category",
+                "action",
+                "name_conflict",
+            ]
+        )
+        for action in actions:
+            writer.writerow(
+                [
+                    action.source_path,
+                    action.dest_path,
+                    action.desired_dest_path,
+                    action.category,
+                    action.action,
+                    "1" if action.name_conflict else "0",
+                ]
+            )

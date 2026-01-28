@@ -4,47 +4,17 @@ Work File Organizer - 工作檔案整理助手（CLI）
 功能：
 - 依副檔名分類
 - 可選時間分層
-- 重複檔案偵測（三層比對）並移到 Duplicates/
+- 重複檔案偵測並移到 Duplicates/
 - 可選檔名清理
 """
 
 from __future__ import annotations
 
 import argparse
-import csv
 import os
-import shutil
-from datetime import datetime
 
-from core import group_duplicates, scan_folder, write_duplicates_report
-from core.hashers import full_hash, partial_hash
-from core.naming import clean_filename, resolve_destination
-from core.types import DuplicateAction, DuplicateMatch, FileInfo
+from core import organize
 from rules_presets import WORK_PRESET
-
-
-def _pick_keep_for_group(
-    group: list[FileInfo],
-    strategy: str,
-    prefer_path: str | None,
-) -> FileInfo:
-    if strategy == "latest":
-        return max(group, key=lambda f: f.mtime)
-    if strategy == "earliest":
-        return min(group, key=lambda f: f.ctime)
-    if strategy == "prefer-path" and prefer_path:
-        for info in group:
-            if os.path.abspath(info.path).startswith(os.path.abspath(prefer_path) + os.sep):
-                return info
-    return group[0]
-
-
-def _category_for_extension(ext: str) -> str:
-    ext_lower = ext.lower()
-    for category, exts in WORK_PRESET.items():
-        if ext_lower in exts:
-            return category
-    return "Others"
 
 
 def main() -> None:
@@ -141,146 +111,33 @@ def main() -> None:
     else:
         conflict_width = max(args.clean_conflict_width, 0)
 
-    files = scan_folder(args.source, args.recursive)
-    print(f"來源資料夾: {len(files)} 個檔案")
+    total_files, duplicate_matches, _, organize_actions = organize(
+        source_folder=args.source,
+        output_folder=args.output,
+        recursive=args.recursive,
+        time_partition=args.time_partition,
+        dry_run=args.dry_run,
+        skip_duplicates=args.skip_duplicates,
+        dupe_strategy=args.dupe_strategy,
+        prefer_path=args.prefer_path,
+        partial_size_mb=args.partial_size_mb,
+        full_hash_algo=args.full_hash,
+        clean_names=clean_enabled,
+        clean_copy_suffix=clean_copy_suffix,
+        clean_normalize_space=clean_normalize_space,
+        clean_remove_special=clean_remove_special,
+        conflict_suffix_width=conflict_width,
+        preset=WORK_PRESET,
+    )
 
-    output_root = args.output
-    duplicates_dir = os.path.join(output_root, "Duplicates")
-    os.makedirs(output_root, exist_ok=True)
-    os.makedirs(duplicates_dir, exist_ok=True)
-
-    duplicate_matches: list[DuplicateMatch] = []
-    duplicate_actions: list[DuplicateAction] = []
-    moved_to_duplicates: set[str] = set()
-
-    if not args.skip_duplicates:
-        groups = group_duplicates(
-            files,
-            partial_bytes=max(args.partial_size_mb, 1) * 1024 * 1024,
-            full_hash_algo=args.full_hash,
-        )
-        for group in groups:
-            keep = _pick_keep_for_group(group, args.dupe_strategy, args.prefer_path)
-            for info in group:
-                if info.path == keep.path:
-                    continue
-                ph = partial_hash(info.path, max(args.partial_size_mb, 1) * 1024 * 1024)
-                fh = full_hash(info.path, algo=args.full_hash)
-                if ph is None or fh is None:
-                    continue
-
-                filename = os.path.basename(info.path)
-                if clean_enabled:
-                    filename = clean_filename(
-                        filename,
-                        remove_copy_suffix=clean_copy_suffix,
-                        normalize_space=clean_normalize_space,
-                        remove_special=clean_remove_special,
-                    )
-
-                desired_dest, dest, name_conflict = resolve_destination(
-                    duplicates_dir,
-                    filename,
-                    conflict_width,
-                )
-
-                action = "preview" if args.dry_run else "moved"
-                if not args.dry_run:
-                    shutil.move(info.path, dest)
-
-                moved_to_duplicates.add(info.path)
-
-                duplicate_matches.append(
-                    DuplicateMatch(
-                        original=keep,
-                        duplicate=info,
-                        partial_hash=ph,
-                        full_hash=fh,
-                    )
-                )
-                duplicate_actions.append(
-                    DuplicateAction(
-                        original=keep,
-                        duplicate=info,
-                        keep_path=keep.path,
-                        move_path=dest,
-                        desired_move_path=desired_dest,
-                        name_conflict=name_conflict,
-                        action=action,
-                        strategy=args.dupe_strategy,
-                        partial_hash=ph,
-                        full_hash=fh,
-                    )
-                )
-
-    # Organize remaining files
-    organize_ops: list[tuple[str, str, str, str, str, bool]] = []
-    for info in files:
-        if info.path in moved_to_duplicates:
-            continue
-        category = _category_for_extension(info.ext)
-        if args.time_partition:
-            month = datetime.fromtimestamp(info.mtime).strftime("%Y-%m")
-            target_dir = os.path.join(output_root, month, category)
-        else:
-            target_dir = os.path.join(output_root, category)
-        os.makedirs(target_dir, exist_ok=True)
-
-        filename = os.path.basename(info.path)
-        if clean_enabled:
-            filename = clean_filename(
-                filename,
-                remove_copy_suffix=clean_copy_suffix,
-                normalize_space=clean_normalize_space,
-                remove_special=clean_remove_special,
-            )
-
-        desired_dest, dest, name_conflict = resolve_destination(
-            target_dir,
-            filename,
-            conflict_width,
-        )
-        action = "preview" if args.dry_run else "moved"
-        if not args.dry_run:
-            shutil.move(info.path, dest)
-        organize_ops.append((info.path, dest, desired_dest, category, action, name_conflict))
-
-    # Reports
+    print(f"來源資料夾: {total_files} 個檔案")
     if duplicate_matches:
-        dupe_report = os.path.join(duplicates_dir, "duplicates_report.csv")
-        write_duplicates_report(duplicate_matches, dupe_report, actions=duplicate_actions)
-        print(f"重複檔案報表已輸出: {dupe_report}")
-
-    organize_report = os.path.join(output_root, "organize_report.csv")
-    with open(organize_report, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            [
-                "source_path",
-                "dest_path",
-                "desired_dest_path",
-                "category",
-                "action",
-                "name_conflict",
-            ]
-        )
-        for src, dest, desired, category, action, name_conflict in organize_ops:
-            writer.writerow(
-                [
-                    src,
-                    dest,
-                    desired,
-                    category,
-                    action,
-                    "1" if name_conflict else "0",
-                ]
-            )
-    print(f"整理報表已輸出: {organize_report}")
-
+        print(f"重複檔案報表已輸出: {os.path.join(args.output, 'Duplicates', 'duplicates_report.csv')}")
+    print(f"整理報表已輸出: {os.path.join(args.output, 'organize_report.csv')}")
     print(
-        f"\n摘要: 來源 {len(files)} 個，"
-        f"重複移動 {len(moved_to_duplicates)} 個，"
-        f"整理移動 {len(organize_ops)} 個"
+        f"\n摘要: 來源 {total_files} 個，"
+        f"重複移動 {len(duplicate_matches)} 個，"
+        f"整理移動 {len(organize_actions)} 個"
     )
 
 

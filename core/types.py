@@ -32,3 +32,13 @@ class DuplicateAction:
     strategy: str
     partial_hash: str
     full_hash: str
+
+
+@dataclass(frozen=True)
+class OrganizeAction:
+    source_path: str
+    dest_path: str
+    desired_dest_path: str
+    category: str
+    action: str
+    name_conflict: bool
