@@ -64,6 +64,9 @@ uv run streamlit run streamlit_app.py
 ### Streamlit：RAW/JPG 配對工具
 左側模式選「RAW/JPG 配對工具」，可在 UI 中完成配對預覽與執行。
 
+### Streamlit：攝影素材整理
+左側模式選「攝影素材整理」，支援日期分類、成對整理與重複檔案隔離。
+
 ## JPG/RAW 配對工具
 
 用途：當你只挑出滿意的 JPG 時，工具會自動找出對應的 RAW 檔並整理或複製。
@@ -101,6 +104,25 @@ uv run pair_raw.py "C:\JPG" "C:\RAW" -o "C:\Pairs" --mode pair-organize --layout
 - 速度最快、最符合常見攝影工作流（DSC01234.ARW + DSC01234.JPG）。
 - 不需要額外依賴（EXIF），可保持執行速度。
 - 當同名衝突很多時，可切換 `stem+parent` 增加辨識度。
+
+## 攝影素材整理（CLI）
+
+```bash
+uv run photo_organize.py "C:\Photos\Incoming" -o "C:\Photos\Output" -r
+
+# 成對 key 用 EXIF
+uv run photo_organize.py "C:\Photos\Incoming" -o "C:\Photos\Output" --pair-key exif
+
+# 輸出布局：每張一資料夾
+uv run photo_organize.py "C:\Photos\Incoming" -o "C:\Photos\Output" --layout per-pair-folder
+
+# 關閉重複檔案偵測
+uv run photo_organize.py "C:\Photos\Incoming" -o "C:\Photos\Output" --disable-duplicates
+```
+
+## 依賴說明（攝影 metadata）
+- EXIF 解析：`exifread`
+- 影片 metadata：`hachoir`
 
 ## 參數說明（find_duplicates.py）
 

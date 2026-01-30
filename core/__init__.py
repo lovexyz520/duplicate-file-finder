@@ -10,6 +10,10 @@ from .pairing import (
     pair_by_stem,
     plan_pair_layout,
 )
+from .media_scanner import scan_media_folder
+from .media_types import MediaFileInfo, PhotoAction, PhotoPlan
+from .photo_planner import plan_photo_actions
+from .photo_executor import execute_photo_actions, execute_duplicate_actions
 from .organizer import organize
 from .scanner import scan_folder
 from .types import DuplicateAction, DuplicateMatch, FileInfo, OrganizeAction
@@ -34,4 +38,11 @@ __all__ = [
     "pair_by_stem",
     "plan_pair_layout",
     "execute_pair_actions",
+    "scan_media_folder",
+    "MediaFileInfo",
+    "PhotoAction",
+    "PhotoPlan",
+    "plan_photo_actions",
+    "execute_photo_actions",
+    "execute_duplicate_actions",
 ]

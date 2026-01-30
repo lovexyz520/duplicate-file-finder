@@ -21,12 +21,18 @@ duplicate-file-finder/
 │   ├── naming.py         # 檔名清理與命名衝突處理
 │   ├── organizer.py      # 工作檔案整理邏輯
 │   ├── pairing.py        # RAW/JPG 配對工具
+│   ├── media_scanner.py  # 攝影素材掃描 + metadata
+│   ├── metadata.py       # EXIF / 影片 metadata
+│   ├── photo_pairing.py  # 攝影素材成對
+│   ├── photo_planner.py  # 攝影素材整理計畫
+│   ├── photo_executor.py # 攝影素材執行 + log
 │   ├── report.py         # CSV 報表輸出
 │   ├── scanner.py        # 檔案掃描/metadata
 │   └── types.py          # 資料結構
 ├── find_duplicates.py     # 重複檔案 CLI
 ├── organize_files.py      # 工作檔案整理 CLI
 ├── pair_raw.py            # RAW/JPG 配對 CLI
+├── photo_organize.py       # 攝影素材整理 CLI
 ├── rules_presets.py       # 分類規則 preset
 ├── streamlit_app.py       # Streamlit UI
 ├── pyproject.toml
@@ -58,6 +64,9 @@ uv run streamlit run streamlit_app.py
 
 # RAW/JPG pairing CLI
 uv run pair_raw.py "C:\SelectedJPG" "C:\AllRAW" -o "C:\RAW_Selected"
+
+# Photo organizer CLI
+uv run photo_organize.py "C:\Photos\Incoming" -o "C:\Photos\Output"
 ```
 
 ## 主要函數
@@ -69,6 +78,7 @@ uv run pair_raw.py "C:\SelectedJPG" "C:\AllRAW" -o "C:\RAW_Selected"
 - `organize(...)`（工作檔案整理）
 - `write_duplicates_report(...)` / `write_organize_report(...)`
 - `pair_by_stem(...)` / `plan_pair_layout(...)` / `execute_pair_actions(...)`
+- `scan_media_folder(...)` / `plan_photo_actions(...)` / `execute_photo_actions(...)`
 
 ## 注意事項
 

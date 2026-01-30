@@ -7,4 +7,6 @@ requires-python = ">=3.10"
 dependencies = [
     "xxhash>=3.6.0",
     "streamlit>=1.33.0",
+    "exifread>=3.0.0",
+    "hachoir>=3.2.0",
 ]

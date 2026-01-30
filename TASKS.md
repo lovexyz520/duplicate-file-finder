@@ -67,6 +67,40 @@ Last updated: 2026-01-28
 - [ ] Unit tests：`core/dupe.py`, `core/actions.py`, `core/naming.py`
 - [ ] Windows 權限錯誤測試（ACL/PermissionError）
 
+## V3.0.0 Plan (攝影素材整理 MVP)
+
+### M0 - 掃描與基礎分類
+- [x] 新增攝影 preset（RAW/JPG/VIDEO/OTHERS），支援 JPG/HEIC
+- [x] 掃描來源資料夾（含子資料夾），讀取基本檔案資訊
+
+### M1 - EXIF/Metadata 支援
+- [x] EXIF 拍攝時間解析（照片）
+- [x] 影片拍攝時間/時長/解析度（可用檔案時間 fallback）
+- [x] 時間來源優先序：EXIF > 檔案 mtime
+
+### M2 - RAW/JPG 成對規則
+- [x] 配對 key：`stem` + `stem+parent`
+- [x] EXIF key（拍攝時間 + 輔助欄位）做為選配策略
+- [x] pairs.csv / orphans.csv 產出
+
+### M3 - 整理輸出與布局
+- [x] 支援兩種輸出布局（參數切換）：
+  - `/Output/YYYY-MM-DD/RAW|JPG|VIDEO`
+  - `/Output/Pairs/DSC01234/RAW|JPG`
+- [x] 命名衝突處理（沿用 resolve_destination）
+
+### M4 - 重複檔案偵測 + 隔離桶
+- [x] 三層重複偵測（size/partial/full hash）
+- [x] 重複檔移動到 `/Output/Duplicates/`
+
+### M5 - 執行與回復
+- [x] 產生 actions_log.jsonl（可回復）
+- [x] 預覽（dry-run）與執行一致化
+
+### M6 - Streamlit UI
+- [x] 新增「攝影素材整理」模式
+- [x] 預覽表格 + 統計 + 確認勾選
+
 ## Done
 - [x] Core module extraction (scanner/dupe/actions/report/types)
 - [x] 3-layer matching (size -> partial hash -> full hash)

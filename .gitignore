@@ -19,6 +19,7 @@ output_folder/
 strategy_test/
 organized_output/
 pair_output/
+photo_output/
 
 # Reports
 duplicates_report.csv

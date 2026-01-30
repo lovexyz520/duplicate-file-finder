@@ -17,8 +17,13 @@ from core import (
     pair_by_stem,
     plan_pair_layout,
     execute_pair_actions,
+    PairRecord,
+    plan_photo_actions,
+    execute_photo_actions,
+    execute_duplicate_actions,
 )
-from rules_presets import WORK_PRESET
+from rules_presets import WORK_PRESET, PHOTO_PRESET
+from core.photo_executor import write_actions_log
 
 
 def _check_overlapping(folder1: str, folder2: str) -> str | None:
@@ -491,20 +496,139 @@ def pairing_ui() -> None:
         st.success(f"完成成對整理：{copied}")
 
 
+def photo_organizer_ui() -> None:
+    st.header("攝影素材整理")
+    with st.expander("使用說明", expanded=True):
+        st.markdown(
+            "\n".join(
+                [
+                    "1. 選擇來源與輸出資料夾。",
+                    "2. 選擇配對 key 與輸出布局。",
+                    "3. 建議先按「一鍵預覽」，查看 pairs / orphans / duplicates。",
+                    "4. 勾選確認後執行。",
+                ]
+            )
+        )
+
+    source = st.text_input("來源資料夾", value=".")
+    output = st.text_input("輸出資料夾", value="photo_output")
+    recursive = st.checkbox("遞迴掃描子資料夾", value=True)
+
+    st.subheader("配對與輸出")
+    layout = st.selectbox("輸出布局", ["by-date-type", "per-pair-folder"], index=0)
+    pair_key = st.selectbox("配對 key", ["stem", "stem+parent", "exif"], index=0)
+
+    st.subheader("重複檔案偵測")
+    enable_duplicates = st.checkbox("啟用重複檔案偵測", value=True)
+    dupe_strategy = st.selectbox("保留策略", ["latest", "earliest", "prefer-path"], index=0)
+    prefer_path = st.text_input("prefer-path（選填）", value="")
+    partial_size_mb = st.number_input("partial hash 大小（MB）", min_value=1, value=1)
+    full_hash = st.selectbox("完整 hash", ["sha256", "xxhash64"], index=0, key="photo_full_hash")
+
+    st.subheader("執行設定")
+    use_move = st.checkbox("使用移動（Move）", value=False)
+    confirm = st.checkbox("我了解這將移動/複製檔案", value=False)
+
+    if st.button("一鍵預覽", key="photo_preview"):
+        if not os.path.isdir(source):
+            st.error("來源資料夾不存在")
+            return
+        plan = plan_photo_actions(
+            source_folder=source,
+            output_folder=output,
+            recursive=recursive,
+            preset=PHOTO_PRESET,
+            layout=layout,
+            pair_key_mode=pair_key,
+            enable_duplicates=enable_duplicates,
+            dupe_strategy=dupe_strategy,
+            prefer_path=prefer_path if prefer_path else None,
+            partial_size_mb=int(partial_size_mb),
+            full_hash_algo=full_hash,
+            conflict_suffix_width=3,
+        )
+
+        st.write(f"來源檔案：{len(plan.media_files)}")
+        st.write(f"配對成功：{len(plan.pairs)}")
+        st.write(f"孤兒 JPG：{len(plan.orphan_jpgs)}")
+        st.write(f"孤兒 RAW：{len(plan.orphan_raws)}")
+        st.write(f"重複檔案：{len(plan.duplicate_matches)}")
+        st.write(f"整理項目：{len(plan.photo_actions)}")
+
+        pairs_path = os.path.join(output, "pairs.csv")
+        orphans_path = os.path.join(output, "orphans.csv")
+        pair_records = [PairRecord(key=p[0], jpg_path=p[1], raw_path=p[2]) for p in plan.pairs]
+        write_pairs_report(pair_records, plan.orphan_jpgs, plan.orphan_raws, pairs_path, orphans_path)
+        st.write(f"pairs.csv：{pairs_path}")
+        st.write(f"orphans.csv：{orphans_path}")
+
+        if plan.duplicate_matches:
+            duplicates_path = os.path.join(output, "duplicates_report.csv")
+            write_duplicates_report(plan.duplicate_matches, duplicates_path, plan.duplicate_actions)
+            st.write(f"duplicates_report.csv：{duplicates_path}")
+
+        pair_rows = [{"key": p[0], "jpg": p[1], "raw": p[2]} for p in plan.pairs]
+        orphan_rows = (
+            [{"type": "jpg", "path": p} for p in plan.orphan_jpgs]
+            + [{"type": "raw", "path": p} for p in plan.orphan_raws]
+        )
+        st.subheader("Pairs")
+        _ops_to_table(pair_rows)
+        st.subheader("Orphans")
+        _ops_to_table(orphan_rows)
+
+    if st.button("執行整理", disabled=not confirm, key="photo_execute"):
+        if not os.path.isdir(source):
+            st.error("來源資料夾不存在")
+            return
+        plan = plan_photo_actions(
+            source_folder=source,
+            output_folder=output,
+            recursive=recursive,
+            preset=PHOTO_PRESET,
+            layout=layout,
+            pair_key_mode=pair_key,
+            enable_duplicates=enable_duplicates,
+            dupe_strategy=dupe_strategy,
+            prefer_path=prefer_path if prefer_path else None,
+            partial_size_mb=int(partial_size_mb),
+            full_hash_algo=full_hash,
+            conflict_suffix_width=3,
+        )
+
+        pairs_path = os.path.join(output, "pairs.csv")
+        orphans_path = os.path.join(output, "orphans.csv")
+        pair_records = [PairRecord(key=p[0], jpg_path=p[1], raw_path=p[2]) for p in plan.pairs]
+        write_pairs_report(pair_records, plan.orphan_jpgs, plan.orphan_raws, pairs_path, orphans_path)
+
+        completed_duplicates = execute_duplicate_actions(plan.duplicate_actions, dry_run=False)
+        completed_actions = execute_photo_actions(plan.photo_actions, dry_run=False, move=use_move)
+        log_path = os.path.join(output, "actions_log.jsonl")
+        write_actions_log(completed_actions, completed_duplicates, log_path)
+
+        if plan.duplicate_matches:
+            duplicates_path = os.path.join(output, "duplicates_report.csv")
+            write_duplicates_report(plan.duplicate_matches, duplicates_path, plan.duplicate_actions)
+
+        st.success(f"已完成整理：{len(completed_actions)}")
+
+
 def main() -> None:
     st.set_page_config(page_title="Duplicate File Finder", layout="wide")
     st.title("Duplicate File Finder / 工作檔案整理助手")
     mode = st.sidebar.radio(
         "模式",
-        ["重複檔案偵測", "工作檔案整理", "RAW/JPG 配對工具"],
+        ["重複檔案偵測", "工作檔案整理", "RAW/JPG 配對工具", "攝影素材整理"],
         index=0,
     )
     if mode == "重複檔案偵測":
         duplicate_finder_ui()
     elif mode == "工作檔案整理":
         organizer_ui()
-    else:
+    elif mode == "RAW/JPG 配對工具":
         pairing_ui()
+    else:
+        photo_organizer_ui()
 
 
 if __name__ == "__main__":
