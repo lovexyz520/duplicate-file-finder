@@ -61,6 +61,9 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 uv run streamlit run streamlit_app.py
 ```
 
+### Streamlit：RAW/JPG 配對工具
+左側模式選「RAW/JPG 配對工具」，可在 UI 中完成配對預覽與執行。
+
 ## JPG/RAW 配對工具
 
 用途：當你只挑出滿意的 JPG 時，工具會自動找出對應的 RAW 檔並整理或複製。

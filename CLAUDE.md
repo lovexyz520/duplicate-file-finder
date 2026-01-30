@@ -20,11 +20,13 @@ duplicate-file-finder/
 │   ├── hashers.py        # partial hash / full hash
 │   ├── naming.py         # 檔名清理與命名衝突處理
 │   ├── organizer.py      # 工作檔案整理邏輯
+│   ├── pairing.py        # RAW/JPG 配對工具
 │   ├── report.py         # CSV 報表輸出
 │   ├── scanner.py        # 檔案掃描/metadata
 │   └── types.py          # 資料結構
 ├── find_duplicates.py     # 重複檔案 CLI
 ├── organize_files.py      # 工作檔案整理 CLI
+├── pair_raw.py            # RAW/JPG 配對 CLI
 ├── rules_presets.py       # 分類規則 preset
 ├── streamlit_app.py       # Streamlit UI
 ├── pyproject.toml
@@ -53,6 +55,9 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --dry-run
 
 # Streamlit UI
 uv run streamlit run streamlit_app.py
+
+# RAW/JPG pairing CLI
+uv run pair_raw.py "C:\SelectedJPG" "C:\AllRAW" -o "C:\RAW_Selected"
 ```
 
 ## 主要函數
@@ -63,6 +68,7 @@ uv run streamlit run streamlit_app.py
 - `group_duplicates(files, partial_bytes, full_hash_algo)`
 - `organize(...)`（工作檔案整理）
 - `write_duplicates_report(...)` / `write_organize_report(...)`
+- `pair_by_stem(...)` / `plan_pair_layout(...)` / `execute_pair_actions(...)`
 
 ## 注意事項
 

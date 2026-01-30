@@ -11,6 +11,12 @@ from core import (
     organize,
     scan_folder,
     write_duplicates_report,
+    write_pairs_report,
+    JPG_EXTS_DEFAULT,
+    RAW_EXTS_DEFAULT,
+    pair_by_stem,
+    plan_pair_layout,
+    execute_pair_actions,
 )
 from rules_presets import WORK_PRESET
 
@@ -335,14 +341,170 @@ def organizer_ui() -> None:
         )
 
 
+def _parse_exts_text(value: str, defaults: set[str]) -> set[str]:
+    items = {v.strip().lower() for v in value.split(",") if v.strip()}
+    if not items:
+        return defaults
+    normalized = set()
+    for ext in items:
+        normalized.add(ext if ext.startswith(".") else f".{ext}")
+    return normalized
+
+
+def pairing_ui() -> None:
+    st.header("RAW/JPG 配對工具")
+    with st.expander("使用說明", expanded=True):
+        st.markdown(
+            "\n".join(
+                [
+                    "1. 選擇 JPG 與 RAW 資料夾，並設定輸出資料夾。",
+                    "2. 選擇模式：copy-raw（只複製 RAW）或 pair-organize（成對整理）。",
+                    "3. 建議先按「一鍵預覽」，確認 pairs / orphans 清單。",
+                    "4. 勾選確認後再執行。",
+                ]
+            )
+        )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        jpg_folder = st.text_input("JPG 資料夾", value="folder1")
+    with col2:
+        raw_folder = st.text_input("RAW 資料夾", value="folder2")
+    output_folder = st.text_input("輸出資料夾", value="pair_output")
+
+    st.subheader("模式與配對設定")
+    mode = st.selectbox(
+        "模式",
+        ["copy-raw", "pair-organize"],
+        index=0,
+    )
+    recursive = st.checkbox("遞迴掃描子資料夾", value=False)
+    key_mode = st.selectbox("配對 key", ["stem", "stem+parent"], index=0)
+
+    st.subheader("副檔名設定")
+    jpg_exts_text = st.text_input(
+        "JPG 副檔名（逗號分隔）",
+        value=",".join(sorted(JPG_EXTS_DEFAULT)),
+    )
+    raw_exts_text = st.text_input(
+        "RAW 副檔名（逗號分隔）",
+        value=",".join(sorted(RAW_EXTS_DEFAULT)),
+    )
+
+    st.subheader("成對整理設定（pair-organize）")
+    layout = st.selectbox(
+        "整理布局",
+        ["raw-with-jpg", "per-pair-folder", "split-index"],
+        index=0,
+    )
+    use_move = st.checkbox("使用移動（Move）", value=False)
+
+    confirm = st.checkbox("我了解這將複製/移動檔案", value=False)
+
+    if st.button("一鍵預覽"):
+        if not os.path.isdir(jpg_folder) or not os.path.isdir(raw_folder):
+            st.error("資料夾不存在")
+            return
+
+        jpg_exts = _parse_exts_text(jpg_exts_text, JPG_EXTS_DEFAULT)
+        raw_exts = _parse_exts_text(raw_exts_text, RAW_EXTS_DEFAULT)
+        pairs, orphan_jpgs, orphan_raws = pair_by_stem(
+            jpg_folder,
+            raw_folder,
+            recursive=recursive,
+            jpg_exts=jpg_exts,
+            raw_exts=raw_exts,
+            key_mode=key_mode,
+        )
+
+        st.write(f"配對成功：{len(pairs)}")
+        st.write(f"孤兒 JPG：{len(orphan_jpgs)}")
+        st.write(f"孤兒 RAW：{len(orphan_raws)}")
+
+        report_pairs = os.path.join(output_folder, "pairs.csv")
+        report_orphans = os.path.join(output_folder, "orphans.csv")
+        write_pairs_report(pairs, orphan_jpgs, orphan_raws, report_pairs, report_orphans)
+        st.write(f"報表輸出：{report_pairs}")
+        st.write(f"報表輸出：{report_orphans}")
+
+        pair_rows = [
+            {"key": p.key, "jpg": p.jpg_path, "raw": p.raw_path} for p in pairs
+        ]
+        orphan_rows = (
+            [{"type": "jpg", "path": p} for p in orphan_jpgs]
+            + [{"type": "raw", "path": p} for p in orphan_raws]
+        )
+        st.subheader("Pairs")
+        _ops_to_table(pair_rows)
+        st.subheader("Orphans")
+        _ops_to_table(orphan_rows)
+
+    if st.button("執行", disabled=not confirm):
+        if not os.path.isdir(jpg_folder) or not os.path.isdir(raw_folder):
+            st.error("資料夾不存在")
+            return
+
+        jpg_exts = _parse_exts_text(jpg_exts_text, JPG_EXTS_DEFAULT)
+        raw_exts = _parse_exts_text(raw_exts_text, RAW_EXTS_DEFAULT)
+        pairs, orphan_jpgs, orphan_raws = pair_by_stem(
+            jpg_folder,
+            raw_folder,
+            recursive=recursive,
+            jpg_exts=jpg_exts,
+            raw_exts=raw_exts,
+            key_mode=key_mode,
+        )
+
+        report_pairs = os.path.join(output_folder, "pairs.csv")
+        report_orphans = os.path.join(output_folder, "orphans.csv")
+        write_pairs_report(pairs, orphan_jpgs, orphan_raws, report_pairs, report_orphans)
+
+        if mode == "copy-raw":
+            actions = plan_pair_layout(
+                pairs,
+                output_folder,
+                layout="raw-with-jpg",
+                action="copy",
+                conflict_suffix_width=3,
+            )
+            raw_actions = [a for a in actions if a.role == "raw"]
+            copied, _ = execute_pair_actions(
+                raw_actions,
+                dry_run=False,
+                move=False,
+            )
+            st.success(f"完成 RAW 複製：{copied}")
+            return
+
+        actions = plan_pair_layout(
+            pairs,
+            output_folder,
+            layout=layout,
+            action="move" if use_move else "copy",
+            conflict_suffix_width=3,
+        )
+        copied, _ = execute_pair_actions(
+            actions,
+            dry_run=False,
+            move=use_move,
+        )
+        st.success(f"完成成對整理：{copied}")
+
+
 def main() -> None:
     st.set_page_config(page_title="Duplicate File Finder", layout="wide")
     st.title("Duplicate File Finder / 工作檔案整理助手")
-    mode = st.sidebar.radio("模式", ["重複檔案偵測", "工作檔案整理"], index=0)
+    mode = st.sidebar.radio(
+        "模式",
+        ["重複檔案偵測", "工作檔案整理", "RAW/JPG 配對工具"],
+        index=0,
+    )
     if mode == "重複檔案偵測":
         duplicate_finder_ui()
-    else:
+    elif mode == "工作檔案整理":
         organizer_ui()
+    else:
+        pairing_ui()
 
 
 if __name__ == "__main__":
