@@ -5,7 +5,7 @@ Last updated: 2026-01-28
 ## Implementation Spec (Requested)
 
 ### P0 - RAW/JPG 配對複製工具（核心 + CLI）
-- [ ] **Spec: core/pairing.py**
+- [x] **Spec: core/pairing.py**
   - 功能：在 JPG 資料夾與 RAW 資料夾間以「檔名 stem」配對，支援大小寫不敏感。
   - RAW 副檔名：`.arw .cr2 .nef .raf .dng .rw2`（可擴充）。
   - Inputs:
@@ -17,14 +17,14 @@ Last updated: 2026-01-28
     - `pairs: list[tuple[jpg_path, raw_path]]`
     - `orphans_jpg: list[jpg_path]`
     - `orphans_raw: list[raw_path]`
-- [ ] **Spec: core/copy.py (or reuse actions.py with copy mode)**
+- [x] **Spec: core/copy.py (or reuse actions.py with copy mode)**
   - `copy_pairs(pairs, output_folder, dry_run, clean_names, conflict_suffix_width)`
   - 命名衝突：沿用 `resolve_destination()`。
   - 回傳：`copied_count, operations`
-- [ ] **Spec: report/pairs**
+- [x] **Spec: report/pairs**
   - `pairs.csv`: `jpg_path, raw_path`
   - `orphans.csv`: `path, type(jpg|raw)`
-- [ ] **CLI: pair_raw.py**
+- [x] **CLI: pair_raw.py**
   - 用法：
     - `uv run pair_raw.py "<JPG_FOLDER>" "<RAW_FOLDER>" -o "<OUTPUT>" --dry-run`
   - 參數：

@@ -5,6 +5,7 @@ import os
 
 from .types import DuplicateAction, DuplicateMatch
 from .types import OrganizeAction
+from .pairing import PairRecord
 
 
 def write_duplicates_report(
@@ -106,3 +107,33 @@ def write_organize_report(actions: list[OrganizeAction], report_path: str) -> No
                     "1" if action.name_conflict else "0",
                 ]
             )
+
+
+def write_pairs_report(
+    pairs: list[PairRecord],
+    orphans_jpg: list[str],
+    orphans_raw: list[str],
+    pairs_path: str,
+    orphans_path: str,
+) -> None:
+    pairs_dir = os.path.dirname(pairs_path)
+    if pairs_dir:
+        os.makedirs(pairs_dir, exist_ok=True)
+
+    with open(pairs_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["key", "jpg_path", "raw_path"])
+        for pair in pairs:
+            writer.writerow([pair.key, pair.jpg_path, pair.raw_path])
+
+    orphans_dir = os.path.dirname(orphans_path)
+    if orphans_dir:
+        os.makedirs(orphans_dir, exist_ok=True)
+
+    with open(orphans_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["type", "path"])
+        for path in orphans_jpg:
+            writer.writerow(["jpg", path])
+        for path in orphans_raw:
+            writer.writerow(["raw", path])

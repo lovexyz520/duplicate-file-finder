@@ -61,6 +61,44 @@ uv run organize_files.py "C:\Downloads" -o "C:\Organized" --skip-duplicates
 uv run streamlit run streamlit_app.py
 ```
 
+## JPG/RAW 配對工具
+
+用途：當你只挑出滿意的 JPG 時，工具會自動找出對應的 RAW 檔並整理或複製。
+
+### 模式 1：JPG → RAW 配對複製（copy-raw）
+以檔名 stem（不分大小寫）配對 JPG 與 RAW，複製配對成功的 RAW 到輸出資料夾。
+
+```bash
+uv run pair_raw.py "C:\SelectedJPG" "C:\AllRAW" -o "C:\RAW_Selected"
+uv run pair_raw.py "C:\SelectedJPG" "C:\AllRAW" -o "C:\RAW_Selected" -r --dry-run
+```
+
+### 模式 2：RAW/JPG 成對整理（pair-organize）
+成對後依指定布局整理，並輸出 pairs.csv / orphans.csv。
+
+```bash
+# A) RAW 與 JPG 放同資料夾（預設）
+uv run pair_raw.py "C:\JPG" "C:\RAW" -o "C:\Pairs" --mode pair-organize
+
+# B) 每張一資料夾
+uv run pair_raw.py "C:\JPG" "C:\RAW" -o "C:\Pairs" --mode pair-organize --layout per-pair-folder
+
+# C) RAW / JPG 分開放 + pairs.csv
+uv run pair_raw.py "C:\JPG" "C:\RAW" -o "C:\Pairs" --mode pair-organize --layout split-index
+```
+
+### 參數說明
+- `--raw-exts`：RAW 副檔名清單（例：`.ARW,.CR2,.NEF,.RAF,.DNG,.RW2`）
+- `--jpg-exts`：JPG 副檔名清單（例：`.JPG,.JPEG,.HEIC`）
+- `--key-mode`：配對 key（`stem` / `stem+parent`）
+- `--dry-run`：僅預覽不複製
+- `--move`：成對整理時用移動而非複製
+
+### 為什麼用「檔名 stem」配對？
+- 速度最快、最符合常見攝影工作流（DSC01234.ARW + DSC01234.JPG）。
+- 不需要額外依賴（EXIF），可保持執行速度。
+- 當同名衝突很多時，可切換 `stem+parent` 增加辨識度。
+
 ## 參數說明（find_duplicates.py）
 
 | 參數 | 說明 |
