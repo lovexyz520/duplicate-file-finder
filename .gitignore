@@ -12,6 +12,12 @@ wheels/
 # Claude Code local settings
 .claude/
 
+# Playwright MCP
+.playwright-mcp/
+
+# Streamlit user settings
+.streamlit_settings.json
+
 # Test folders
 folder1/
 folder2/
@@ -21,5 +27,17 @@ organized_output/
 pair_output/
 photo_output/
 
-# Reports
+# Reports (generated)
 duplicates_report.csv
+organize_report.csv
+pairs.csv
+orphans.csv
+actions_log.jsonl
+
+# Windows junk files
+nul
+Thumbs.db
+Desktop.ini
+
+# Development task tracker
+TASKS.md

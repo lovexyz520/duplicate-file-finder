@@ -174,14 +174,27 @@ name = "duplicate-file-finder"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "exifread" },
+    { name = "hachoir" },
     { name = "streamlit" },
     { name = "xxhash" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "exifread", specifier = ">=3.0.0" },
+    { name = "hachoir", specifier = ">=3.2.0" },
     { name = "streamlit", specifier = ">=1.33.0" },
     { name = "xxhash", specifier = ">=3.6.0" },
+]
+
+[[package]]
+name = "exifread"
+version = "3.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e2/4e/d8fce8810d819db47f5b159e75223511c5ccd7ad07c2feca64cf7fab2477/exifread-3.5.1.tar.gz", hash = "sha256:9f998f80d3062741c976dfc4fd033424bc40932937994e4d2181eb70c4b6aedd", size = 56552, upload-time = "2025-08-23T21:59:18.123Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/a3/20e34a55c7b225110d3822d07c3cab9e8653d9c179e36783f2ed632a96a7/exifread-3.5.1-py3-none-any.whl", hash = "sha256:e5426ce2857423ad401e575ea9d159dc97449dc041fb6e61b35109caea72c311", size = 59742, upload-time = "2025-08-23T21:59:16.633Z" },
 ]
 
 [[package]]
@@ -206,6 +219,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/df/b5/59d16470a1f0dfe8c793f9ef56fd3826093fc52b3bd96d6b9d6c26c7e27b/gitpython-3.1.46.tar.gz", hash = "sha256:400124c7d0ef4ea03f7310ac2fbf7151e09ff97f2a3288d64a440c584a29c37f", size = 215371, upload-time = "2026-01-01T15:37:32.073Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/09/e21df6aef1e1ffc0c816f0522ddc3f6dcded766c3261813131c78a704470/gitpython-3.1.46-py3-none-any.whl", hash = "sha256:79812ed143d9d25b6d176a10bb511de0f9c67b1fa641d82097b0ab90398a2058", size = 208620, upload-time = "2026-01-01T15:37:30.574Z" },
+]
+
+[[package]]
+name = "hachoir"
+version = "3.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/e5/3a7d611dc87aab2c088be040f5da2f6937e308044983848e648d97ef388b/hachoir-3.3.0.tar.gz", hash = "sha256:fd7679f649c17ee45ab2ba5eacddc702c667ea5200c0a1fd063d4615fa7270d2", size = 7111887, upload-time = "2023-12-12T10:59:30.986Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/96/9570e6604114e9b2b2e1d90a89d01d10646b9cb6f54bba78f6de5fbbceb1/hachoir-3.3.0-py3-none-any.whl", hash = "sha256:9f721af67867d933383398b9605bc388db25f55dde1034d2bfde91f05e5d9910", size = 650439, upload-time = "2023-12-12T10:59:28.091Z" },
 ]
 
 [[package]]
