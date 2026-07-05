@@ -13,7 +13,13 @@ from __future__ import annotations
 import argparse
 import os
 
-from core import organize
+from core import (
+    default_log_path,
+    duplicate_actions_to_records,
+    organize,
+    organize_actions_to_records,
+    write_oplog,
+)
 from rules_presets import WORK_PRESET
 
 
@@ -87,6 +93,22 @@ def main() -> None:
         default=None,
         help="命名衝突自動補碼位數（預設: clean-names=3，其餘=1）",
     )
+    parser.add_argument(
+        "--min-size-kb",
+        type=int,
+        default=0,
+        help="略過小於此大小的檔案（KB，預設: 0 = 不過濾）",
+    )
+    parser.add_argument(
+        "--exclude-dirs",
+        default="",
+        help="排除的資料夾名稱（逗號分隔，例：.git,node_modules）",
+    )
+    parser.add_argument(
+        "--no-hidden",
+        action="store_true",
+        help="略過隱藏檔案與資料夾（以 . 開頭）",
+    )
 
     args = parser.parse_args()
 
@@ -111,7 +133,9 @@ def main() -> None:
     else:
         conflict_width = max(args.clean_conflict_width, 0)
 
-    total_files, duplicate_matches, _, organize_actions = organize(
+    exclude_dirs = {d.strip() for d in args.exclude_dirs.split(",") if d.strip()} or None
+
+    total_files, duplicate_matches, duplicate_actions, organize_actions = organize(
         source_folder=args.source,
         output_folder=args.output,
         recursive=args.recursive,
@@ -128,16 +152,40 @@ def main() -> None:
         clean_remove_special=clean_remove_special,
         conflict_suffix_width=conflict_width,
         preset=WORK_PRESET,
+        min_size=args.min_size_kb * 1024,
+        include_hidden=not args.no_hidden,
+        exclude_dirs=exclude_dirs,
     )
 
     print(f"來源資料夾: {total_files} 個檔案")
-    if duplicate_matches:
-        print(f"重複檔案報表已輸出: {os.path.join(args.output, 'Duplicates', 'duplicates_report.csv')}")
-    print(f"整理報表已輸出: {os.path.join(args.output, 'organize_report.csv')}")
+
+    failures = [a for a in organize_actions if a.action == "failed"] + [
+        a for a in duplicate_actions if a.action == "failed"
+    ]
+    if failures:
+        print(f"\n失敗 {len(failures)} 筆:")
+        for a in failures:
+            src = getattr(a, "source_path", None) or a.duplicate.path
+            print(f"[失敗] {src}: {a.error}")
+
+    if args.dry_run:
+        print("（預覽模式：未移動檔案、未輸出報表）")
+    else:
+        if duplicate_matches:
+            print(f"重複檔案報表已輸出: {os.path.join(args.output, 'Duplicates', 'duplicates_report.csv')}")
+        print(f"整理報表已輸出: {os.path.join(args.output, 'organize_report.csv')}")
+
+        log_path = default_log_path(args.output)
+        records = organize_actions_to_records(organize_actions) + duplicate_actions_to_records(duplicate_actions)
+        write_oplog(records, log_path)
+        print(f"操作 log: {log_path}")
+        print(f"還原指令: uv run undo_actions.py \"{log_path}\"")
+
     print(
         f"\n摘要: 來源 {total_files} 個，"
         f"重複移動 {len(duplicate_matches)} 個，"
-        f"整理移動 {len(organize_actions)} 個"
+        f"整理移動 {len(organize_actions)} 個，"
+        f"失敗 {len(failures)} 個"
     )
 
 

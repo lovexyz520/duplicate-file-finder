@@ -1,98 +1,118 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
-from typing import Iterable
+from dataclasses import replace
+from typing import Callable, Iterable
 
 from .media_types import PhotoAction
+from .oplog import make_record, write_oplog
 from .types import DuplicateAction
+
+ProgressCallback = Callable[[int, int], None]
 
 
 def execute_photo_actions(
     actions: Iterable[PhotoAction],
     dry_run: bool,
     move: bool,
+    progress: ProgressCallback | None = None,
 ) -> list[PhotoAction]:
+    action_list = list(actions)
+    total = len(action_list)
     completed: list[PhotoAction] = []
-    for action in actions:
+    for index, action in enumerate(action_list, start=1):
+        if progress:
+            progress(index, total)
         if dry_run:
-            completed.append(
-                PhotoAction(
-                    source_path=action.source_path,
-                    dest_path=action.dest_path,
-                    desired_dest_path=action.desired_dest_path,
-                    category=action.category,
-                    action="preview",
-                    name_conflict=action.name_conflict,
-                    pair_key=action.pair_key,
-                    pair_role=action.pair_role,
-                    shot_date=action.shot_date,
-                )
-            )
+            completed.append(replace(action, action="preview"))
             continue
-        os.makedirs(os.path.dirname(action.dest_path), exist_ok=True)
-        if move:
-            shutil.move(action.source_path, action.dest_path)
-            verb = "moved"
-        else:
-            shutil.copy2(action.source_path, action.dest_path)
-            verb = "copied"
-        completed.append(
-            PhotoAction(
-                source_path=action.source_path,
-                dest_path=action.dest_path,
-                desired_dest_path=action.desired_dest_path,
-                category=action.category,
-                action=verb,
-                name_conflict=action.name_conflict,
-                pair_key=action.pair_key,
-                pair_role=action.pair_role,
-                shot_date=action.shot_date,
-            )
-        )
+        try:
+            os.makedirs(os.path.dirname(action.dest_path), exist_ok=True)
+            if move:
+                shutil.move(action.source_path, action.dest_path)
+                verb = "moved"
+            else:
+                shutil.copy2(action.source_path, action.dest_path)
+                verb = "copied"
+            completed.append(replace(action, action=verb))
+        except Exception as exc:  # noqa: BLE001 - 逐檔隔離錯誤
+            completed.append(replace(action, action="failed", error=str(exc)))
     return completed
 
 
 def execute_duplicate_actions(
     actions: Iterable[DuplicateAction],
     dry_run: bool,
+    progress: ProgressCallback | None = None,
 ) -> list[DuplicateAction]:
+    action_list = list(actions)
+    total = len(action_list)
     completed: list[DuplicateAction] = []
-    for action in actions:
+    for index, action in enumerate(action_list, start=1):
+        if progress:
+            progress(index, total)
         if dry_run or action.move_path is None:
             completed.append(
-                DuplicateAction(
-                    original=action.original,
-                    duplicate=action.duplicate,
-                    keep_path=action.keep_path,
-                    move_path=action.move_path,
-                    desired_move_path=action.desired_move_path,
-                    name_conflict=action.name_conflict,
-                    action="preview" if dry_run else action.action,
-                    strategy=action.strategy,
-                    partial_hash=action.partial_hash,
-                    full_hash=action.full_hash,
-                )
+                replace(action, action="preview" if dry_run else action.action)
             )
             continue
-        os.makedirs(os.path.dirname(action.move_path), exist_ok=True)
-        shutil.move(action.duplicate.path, action.move_path)
-        completed.append(
-            DuplicateAction(
-                original=action.original,
-                duplicate=action.duplicate,
-                keep_path=action.keep_path,
-                move_path=action.move_path,
-                desired_move_path=action.desired_move_path,
+        try:
+            os.makedirs(os.path.dirname(action.move_path), exist_ok=True)
+            shutil.move(action.duplicate.path, action.move_path)
+            completed.append(replace(action, action="moved"))
+        except Exception as exc:  # noqa: BLE001 - 逐檔隔離錯誤
+            completed.append(replace(action, action="failed", error=str(exc)))
+    return completed
+
+
+def photo_actions_to_records(actions: Iterable[PhotoAction]) -> list[dict]:
+    records = []
+    for action in actions:
+        if action.action in {"preview", "kept_by_strategy"}:
+            continue
+        op = "move" if action.action in {"moved", "failed"} else "copy"
+        if action.action == "copied":
+            op = "copy"
+        records.append(
+            make_record(
+                op=op,
+                source=action.source_path,
+                dest=action.dest_path,
+                status=action.action,
+                kind="photo",
+                error=action.error,
+                category=action.category,
+                pair_key=action.pair_key,
+                pair_role=action.pair_role,
+                shot_date=action.shot_date,
                 name_conflict=action.name_conflict,
-                action="moved",
-                strategy=action.strategy,
-                partial_hash=action.partial_hash,
-                full_hash=action.full_hash,
             )
         )
-    return completed
+    return records
+
+
+def duplicate_actions_to_records(actions: Iterable[DuplicateAction]) -> list[dict]:
+    records = []
+    for action in actions:
+        if action.action in {"preview", "preview_trash", "kept_by_strategy"}:
+            continue
+        op = "trash" if action.action == "trashed" else "move"
+        records.append(
+            make_record(
+                op=op,
+                source=action.duplicate.path,
+                dest=action.move_path,
+                status=action.action,
+                kind="duplicate",
+                error=action.error,
+                keep_path=action.keep_path,
+                strategy=action.strategy,
+                full_hash=action.full_hash,
+                name_conflict=action.name_conflict,
+            )
+        )
+    return records
 
 
 def write_actions_log(
@@ -100,36 +120,7 @@ def write_actions_log(
     duplicate_actions: Iterable[DuplicateAction],
     log_path: str,
 ) -> None:
-    log_dir = os.path.dirname(log_path)
-    if log_dir:
-        os.makedirs(log_dir, exist_ok=True)
-    with open(log_path, "w", encoding="utf-8") as f:
-        for action in actions:
-            record = {
-                "type": "photo",
-                "source_path": action.source_path,
-                "dest_path": action.dest_path,
-                "desired_dest_path": action.desired_dest_path,
-                "category": action.category,
-                "action": action.action,
-                "name_conflict": action.name_conflict,
-                "pair_key": action.pair_key,
-                "pair_role": action.pair_role,
-                "shot_date": action.shot_date,
-            }
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        for action in duplicate_actions:
-            record = {
-                "type": "duplicate",
-                "duplicate_path": action.duplicate.path,
-                "original_path": action.original.path,
-                "keep_path": action.keep_path,
-                "move_path": action.move_path,
-                "desired_move_path": action.desired_move_path,
-                "action": action.action,
-                "strategy": action.strategy,
-                "name_conflict": action.name_conflict,
-                "partial_hash": action.partial_hash,
-                "full_hash": action.full_hash,
-            }
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    records = photo_actions_to_records(actions) + duplicate_actions_to_records(
+        duplicate_actions
+    )
+    write_oplog(records, log_path)

@@ -6,9 +6,12 @@ import os
 from core import (
     JPG_EXTS_DEFAULT,
     RAW_EXTS_DEFAULT,
+    default_log_path,
     execute_pair_actions,
+    pair_actions_to_records,
     pair_by_stem,
     plan_pair_layout,
+    write_oplog,
     write_pairs_report,
 )
 
@@ -87,11 +90,12 @@ def main() -> None:
     print(f"孤兒 JPG：{len(orphan_jpgs)}")
     print(f"孤兒 RAW：{len(orphan_raws)}")
 
-    report_pairs = os.path.join(args.output, "pairs.csv")
-    report_orphans = os.path.join(args.output, "orphans.csv")
-    write_pairs_report(pairs, orphan_jpgs, orphan_raws, report_pairs, report_orphans)
-    print(f"報表輸出：{report_pairs}")
-    print(f"報表輸出：{report_orphans}")
+    if not args.dry_run:
+        report_pairs = os.path.join(args.output, "pairs.csv")
+        report_orphans = os.path.join(args.output, "orphans.csv")
+        write_pairs_report(pairs, orphan_jpgs, orphan_raws, report_pairs, report_orphans)
+        print(f"報表輸出：{report_pairs}")
+        print(f"報表輸出：{report_orphans}")
 
     if args.mode == "copy-raw":
         actions = plan_pair_layout(
@@ -101,28 +105,39 @@ def main() -> None:
             action="copy",
             conflict_suffix_width=3,
         )
-        raw_actions = [a for a in actions if a.role == "raw"]
-        copied, _ = execute_pair_actions(
-            raw_actions,
-            dry_run=args.dry_run,
-            move=False,
+        actions = [a for a in actions if a.role == "raw"]
+        use_move = False
+        verb = "RAW 複製"
+    else:
+        actions = plan_pair_layout(
+            pairs,
+            args.output,
+            layout=args.layout,
+            action="move" if args.move else "copy",
+            conflict_suffix_width=3,
         )
-        print(f"{'預覽' if args.dry_run else '完成'} RAW 複製：{copied}")
-        return
+        use_move = args.move
+        verb = "成對整理"
 
-    actions = plan_pair_layout(
-        pairs,
-        args.output,
-        layout=args.layout,
-        action="move" if args.move else "copy",
-        conflict_suffix_width=3,
-    )
-    copied, _ = execute_pair_actions(
+    copied, completed = execute_pair_actions(
         actions,
         dry_run=args.dry_run,
-        move=args.move,
+        move=use_move,
     )
-    print(f"{'預覽' if args.dry_run else '完成'} 成對整理：{copied}")
+
+    failures = [a for a in completed if a.action == "failed"]
+    if failures:
+        print(f"\n失敗 {len(failures)} 筆:")
+        for a in failures:
+            print(f"[失敗] {a.src_path}: {a.error}")
+
+    if not args.dry_run:
+        log_path = default_log_path(args.output)
+        write_oplog(pair_actions_to_records(completed, move=use_move), log_path)
+        print(f"操作 log: {log_path}")
+        print(f"還原指令: uv run undo_actions.py \"{log_path}\"")
+
+    print(f"{'預覽' if args.dry_run else '完成'} {verb}：{copied}，失敗 {len(failures)}")
 
 
 if __name__ == "__main__":

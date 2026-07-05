@@ -32,6 +32,7 @@ class DuplicateAction:
     strategy: str
     partial_hash: str
     full_hash: str
+    error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,3 +43,4 @@ class OrganizeAction:
     category: str
     action: str
     name_conflict: bool
+    error: str | None = None

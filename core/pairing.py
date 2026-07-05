@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
-from dataclasses import dataclass
-from typing import Iterable
+from dataclasses import dataclass, replace
+from typing import Callable
 
-from .naming import resolve_destination
+from .naming import DestinationResolver, safe_key_folder
+from .scanner import iter_files
 
+ProgressCallback = Callable[[int, int], None]
 
 JPG_EXTS_DEFAULT = {".jpg", ".jpeg", ".heic"}
 RAW_EXTS_DEFAULT = {".arw", ".cr2", ".nef", ".raf", ".dng", ".rw2"}
@@ -26,26 +27,15 @@ class PairAction:
     role: str  # "jpg" | "raw"
     src_path: str
     dest_path: str
-    action: str  # "preview" | "copied" | "moved"
+    action: str  # "preview" | "copied" | "moved" | "failed"
     name_conflict: bool
-
-
-def _iter_files(folder: str, recursive: bool) -> Iterable[str]:
-    if recursive:
-        for root, _, filenames in os.walk(folder):
-            for filename in filenames:
-                yield os.path.join(root, filename)
-    else:
-        for filename in os.listdir(folder):
-            path = os.path.join(folder, filename)
-            if os.path.isfile(path):
-                yield path
+    error: str | None = None
 
 
 def _collect_paths(folder: str, recursive: bool, exts: set[str]) -> list[str]:
     paths: list[str] = []
     exts_lower = {ext.lower() for ext in exts}
-    for path in _iter_files(folder, recursive):
+    for path in iter_files(folder, recursive):
         _, ext = os.path.splitext(path)
         if ext.lower() in exts_lower:
             paths.append(path)
@@ -108,10 +98,6 @@ def pair_by_stem(
     return pairs, orphan_jpgs, orphan_raws
 
 
-def _safe_key_folder(key: str) -> str:
-    return re.sub(r"[^\w-]", "_", key).strip("_") or "pair"
-
-
 def plan_pair_layout(
     pairs: list[PairRecord],
     output_folder: str,
@@ -119,23 +105,22 @@ def plan_pair_layout(
     action: str,
     conflict_suffix_width: int = 3,
 ) -> list[PairAction]:
-    os.makedirs(output_folder, exist_ok=True)
+    """規劃配對輸出。純規劃，不觸碰磁碟（資料夾由 execute 建立）。"""
     planned: list[PairAction] = []
+    resolver = DestinationResolver()
 
     for pair in pairs:
         if layout == "raw-with-jpg":
             target_dir = os.path.join(output_folder, "RAW")
         elif layout == "per-pair-folder":
-            target_dir = os.path.join(output_folder, "Pairs", _safe_key_folder(pair.key))
+            target_dir = os.path.join(output_folder, "Pairs", safe_key_folder(pair.key))
         elif layout == "split-index":
             target_dir = os.path.join(output_folder, "RAW")
         else:
             target_dir = output_folder
 
-        os.makedirs(target_dir, exist_ok=True)
-
         raw_name = os.path.basename(pair.raw_path)
-        desired_raw, raw_dest, raw_conflict = resolve_destination(
+        _, raw_dest, raw_conflict = resolver.resolve(
             target_dir,
             raw_name,
             conflict_suffix_width,
@@ -153,20 +138,14 @@ def plan_pair_layout(
 
         if layout == "split-index":
             jpg_dir = os.path.join(output_folder, "Photos")
-            os.makedirs(jpg_dir, exist_ok=True)
-            jpg_name = os.path.basename(pair.jpg_path)
-            desired_jpg, jpg_dest, jpg_conflict = resolve_destination(
-                jpg_dir,
-                jpg_name,
-                conflict_suffix_width,
-            )
         else:
-            jpg_name = os.path.basename(pair.jpg_path)
-            desired_jpg, jpg_dest, jpg_conflict = resolve_destination(
-                target_dir,
-                jpg_name,
-                conflict_suffix_width,
-            )
+            jpg_dir = target_dir
+        jpg_name = os.path.basename(pair.jpg_path)
+        _, jpg_dest, jpg_conflict = resolver.resolve(
+            jpg_dir,
+            jpg_name,
+            conflict_suffix_width,
+        )
 
         planned.append(
             PairAction(
@@ -186,40 +165,52 @@ def execute_pair_actions(
     actions: list[PairAction],
     dry_run: bool = False,
     move: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> tuple[int, list[PairAction]]:
     copied = 0
     completed: list[PairAction] = []
-    for action in actions:
+    total = len(actions)
+    for index, action in enumerate(actions, start=1):
+        if progress:
+            progress(index, total)
         if dry_run:
-            completed.append(
-                PairAction(
-                    key=action.key,
-                    role=action.role,
-                    src_path=action.src_path,
-                    dest_path=action.dest_path,
-                    action="preview",
-                    name_conflict=action.name_conflict,
-                )
-            )
+            completed.append(replace(action, action="preview"))
             continue
 
-        if move:
-            shutil.move(action.src_path, action.dest_path)
-            verb = "moved"
-        else:
-            shutil.copy2(action.src_path, action.dest_path)
-            verb = "copied"
-        copied += 1
-        completed.append(
-            PairAction(
-                key=action.key,
-                role=action.role,
-                src_path=action.src_path,
-                dest_path=action.dest_path,
-                action=verb,
-                name_conflict=action.name_conflict,
-            )
-        )
+        try:
+            os.makedirs(os.path.dirname(action.dest_path), exist_ok=True)
+            if move:
+                shutil.move(action.src_path, action.dest_path)
+                verb = "moved"
+            else:
+                shutil.copy2(action.src_path, action.dest_path)
+                verb = "copied"
+            copied += 1
+            completed.append(replace(action, action=verb))
+        except Exception as exc:  # noqa: BLE001 - 逐檔隔離錯誤
+            completed.append(replace(action, action="failed", error=str(exc)))
 
     return copied, completed
 
+
+def pair_actions_to_records(actions: list[PairAction], move: bool) -> list[dict]:
+    from .oplog import make_record
+
+    records = []
+    for action in actions:
+        if action.action == "preview":
+            continue
+        records.append(
+            make_record(
+                op="move" if move else "copy",
+                source=action.src_path,
+                dest=action.dest_path,
+                status=action.action,
+                kind="pair",
+                error=action.error,
+                pair_key=action.key,
+                pair_role=action.role,
+                name_conflict=action.name_conflict,
+            )
+        )
+    return records

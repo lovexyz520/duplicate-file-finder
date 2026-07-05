@@ -32,6 +32,7 @@ class PhotoAction:
     pair_key: str | None
     pair_role: str | None
     shot_date: str | None
+    error: str | None = None
 
 
 @dataclass(frozen=True)

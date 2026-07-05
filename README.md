@@ -1,15 +1,29 @@
-# 檔案管理工具箱 v3.1.0
+# 檔案管理工具箱 v3.2.0
 
-一套完整的檔案整理解決方案，包含重複檔案偵測、工作檔案分類、攝影素材配對與整理等功能，支援 CLI 與 Streamlit 圖形介面。
+一套完整的檔案整理解決方案，包含重複檔案偵測、工作檔案分類、攝影素材配對與整理等功能，支援 CLI 與 Streamlit 圖形介面。所有執行都會產生操作 log，隨時可一鍵復原。
 
 ## 功能總覽
 
 | 功能模組 | 說明 | CLI | UI |
 |----------|------|-----|-----|
 | 🔍 重複檔案偵測 | 比對兩個資料夾，找出並移動重複檔案 | ✅ | ✅ |
+| 🧹 單資料夾去重 | 掃描單一資料夾內的重複檔案，每組保留一份 | — | ✅ |
+| 🪞 相似照片偵測 | perceptual hash 找出近似照片（不同解析度/輕度編輯） | — | ✅ |
 | 📁 工作檔案整理 | 依副檔名分類，支援時間分層與重複偵測 | ✅ | ✅ |
 | 📷 RAW/JPG 配對 | 根據檔名配對 RAW 與 JPG，支援多種整理布局 | ✅ | ✅ |
 | 🎞️ 攝影素材整理 | 日期分類、成對整理、重複檔案隔離 | ✅ | ✅ |
+| ↩️ 復原操作 | 從操作 log 反向還原（移動搬回、複製刪副本） | ✅ | ✅ |
+
+### v3.2.0 重點更新
+
+- **復原（Undo）**：每次執行輸出 `actions_log_*.jsonl`，UI「復原操作」或 `undo_actions.py` 可還原
+- **安全性**：修正同名檔案在規劃/執行流程可能互相覆蓋的問題；UI 擋下相同資料夾互比；預覽完全不觸碰磁碟
+- **穩健性**：單一檔案失敗不再中斷整批，失敗清單會完整回報
+- **資源回收桶**：重複檔可改送資源回收桶（send2trash）
+- **掃描過濾**：最小檔案大小、排除資料夾（.git、node_modules…）、略過隱藏檔
+- **HEIC**：支援讀取 HEIC/HEIF 的 EXIF 拍攝時間（pillow-heif）
+- **真實進度條**：以實際處理進度顯示，不再是固定百分比
+- **測試**：新增 60+ 個 pytest 單元測試
 
 ## 安裝
 
@@ -41,6 +55,9 @@ uv run pair_raw.py "C:\SelectedJPG" "C:\AllRAW" -o "C:\RAW_Selected" --dry-run
 
 # 攝影素材整理
 uv run photo_organize.py "C:\Photos\Incoming" -o "C:\Photos\Output" --dry-run
+
+# 復原上一次執行（log 路徑會在執行結束時印出）
+uv run undo_actions.py "C:\重複檔案\actions_log_20260705_120000.jsonl" --dry-run
 ```
 
 ---
@@ -119,6 +136,34 @@ uv run find_duplicates.py --partial-size-mb 2 --full-hash xxhash64
 | `--clean-normalize-space` | 空白正規化（多空白合併為一個） |
 | `--clean-remove-special` | 移除檔名中的特殊字元 |
 | `--clean-conflict-width` | 命名衝突自動補碼位數（預設：3） |
+| `--to-trash` | 重複檔移到資源回收桶（取代移到輸出資料夾） |
+| `--min-size-kb` | 略過小於此大小的檔案（KB） |
+| `--exclude-dirs` | 排除的資料夾名稱（逗號分隔） |
+| `--no-hidden` | 略過隱藏檔案與資料夾（`.` 開頭） |
+
+---
+
+## ↩️ 復原操作（Undo）
+
+每次實際執行（非 dry-run）都會在輸出資料夾產生 `actions_log_*.jsonl`，記錄每一筆移動/複製。
+
+```bash
+# 預覽可還原的項目
+uv run undo_actions.py "C:\Output\actions_log_20260705_120000.jsonl" --dry-run
+
+# 執行還原
+uv run undo_actions.py "C:\Output\actions_log_20260705_120000.jsonl"
+```
+
+還原規則：
+
+| 原操作 | 還原方式 |
+|--------|----------|
+| 移動（moved） | 從目的地搬回原始位置（原位已被佔用則略過） |
+| 複製（copied） | 刪除複製出來的副本，原始檔不受影響 |
+| 資源回收桶（trashed） | 無法自動還原，請手動從回收桶還原 |
+
+還原按「後進先出」順序執行；UI 的「復原操作」頁籤會自動列出最近的 log。
 
 ---
 
@@ -285,15 +330,19 @@ uv run streamlit run streamlit_app.py
 
 | 功能 | 說明 |
 |------|------|
-| 📊 進度條顯示 | 掃描與執行過程顯示即時進度 |
+| 📊 真實進度條 | 依實際掃描/比對/移動進度顯示 |
 | 📈 預估檔案數 | 掃描前顯示預估檔案數量 |
-| 👁️ 一鍵預覽 | 執行前先預覽結果，確認後再執行 |
-| 🗑️ 清除結果 | 預覽後可清除結果重新設定 |
+| 👁️ 一鍵預覽 | 預覽完全不觸碰磁碟；執行時直接採用預覽清單（所見即所得） |
+| ⬇️ 報表下載 | 預覽階段以下載按鈕提供 CSV（UTF-8 BOM，Excel 直開不亂碼） |
+| ↩️ 一鍵復原 | 執行後提示 log 位置，「復原操作」頁籤可還原 |
+| 🗑️ 資源回收桶 | 重複檔可改送資源回收桶 |
+| 🧯 掃描過濾 | 最小檔案大小、排除資料夾、略過隱藏檔 |
+| ❌ 失敗清單 | 個別檔案失敗不中斷，結束後完整列出 |
 | 🎉 成功動畫 | 執行完成顯示動畫與 toast 通知 |
 | 📜 操作歷史 | 側邊欄顯示最近 20 筆操作記錄 |
 | 💾 設定自動儲存 | 常用設定自動儲存，下次開啟自動載入 |
 | 📁 資料夾選擇器 | 點擊 📁 按鈕快速選擇資料夾 |
-| 🖼️ 圖片預覽 | 攝影素材整理模式支援圖片預覽 |
+| 🖼️ 圖片預覽 | 攝影/相似照片模式支援縮圖預覽 |
 
 ---
 
@@ -346,26 +395,41 @@ uv run streamlit run streamlit_app.py
 ```
 duplicate-file-finder/
 ├── core/
-│   ├── actions.py        # 移動重複檔案 + 衝突命名處理
-│   ├── dupe.py           # 三層比對邏輯
+│   ├── actions.py        # 移動重複檔案 + 資源回收桶 + 衝突命名
+│   ├── dupe.py           # 三層比對邏輯 + 保留策略
 │   ├── hashers.py        # partial hash / full hash
-│   ├── naming.py         # 檔名清理與命名衝突處理
+│   ├── naming.py         # 檔名清理 + DestinationResolver（防覆蓋）
+│   ├── oplog.py          # 統一操作 log（JSONL）
 │   ├── organizer.py      # 工作檔案整理邏輯
 │   ├── pairing.py        # RAW/JPG 配對工具
+│   ├── paths.py          # 路徑重疊檢查
 │   ├── media_scanner.py  # 攝影素材掃描 + metadata
-│   ├── metadata.py       # EXIF / 影片 metadata
+│   ├── metadata.py       # EXIF / HEIC / 影片 metadata
 │   ├── photo_pairing.py  # 攝影素材成對
 │   ├── photo_planner.py  # 攝影素材整理計畫
 │   ├── photo_executor.py # 攝影素材執行 + log
-│   ├── report.py         # CSV 報表輸出
-│   ├── scanner.py        # 檔案掃描 / metadata
-│   └── types.py          # 資料結構
+│   ├── report.py         # CSV 報表（檔案 + 記憶體字串）
+│   ├── scanner.py        # 檔案掃描 + 過濾條件
+│   ├── similar.py        # 相似照片偵測（perceptual hash）
+│   ├── types.py          # 資料結構
+│   └── undo.py           # 還原邏輯
+├── ui/                   # Streamlit UI（各模式一檔）
+│   ├── common.py         # 共用元件、設定、進度條、歷史
+│   ├── dupe.py           # 重複檔案偵測
+│   ├── single_dupe.py    # 單資料夾去重
+│   ├── similar.py        # 相似照片偵測
+│   ├── organizer.py      # 工作檔案整理
+│   ├── pairing.py        # RAW/JPG 配對
+│   ├── photo.py          # 攝影素材整理
+│   └── undo_ui.py        # 復原操作
+├── tests/                # pytest 測試（60+ 案例）
 ├── find_duplicates.py    # 重複檔案 CLI
 ├── organize_files.py     # 工作檔案整理 CLI
 ├── pair_raw.py           # RAW/JPG 配對 CLI
 ├── photo_organize.py     # 攝影素材整理 CLI
+├── undo_actions.py       # 復原 CLI
 ├── rules_presets.py      # 分類規則 preset
-├── streamlit_app.py      # Streamlit UI
+├── streamlit_app.py      # Streamlit UI 入口
 ├── pyproject.toml
 └── README.md
 ```
@@ -378,14 +442,28 @@ duplicate-file-finder/
 |------|------|
 | `xxhash` | 快速 partial hash 計算 |
 | `streamlit` | 圖形介面 |
-| `exifread` | EXIF 資訊讀取（攝影素材） |
+| `exifread` | EXIF 資訊讀取（JPG/RAW） |
 | `hachoir` | 影片 metadata 讀取 |
+| `pillow` + `pillow-heif` | HEIC/HEIF EXIF 讀取、相似照片縮圖 |
+| `imagehash` | 相似照片 perceptual hash |
+| `send2trash` | 資源回收桶 |
+| `pytest`（dev） | 單元測試 |
+
+執行測試：
+
+```bash
+uv run pytest tests
+```
 
 ---
 
 ## 注意事項
 
 - ⚠️ 請先用 `--dry-run` 或「一鍵預覽」預覽結果後再執行
+- 預覽（dry-run / 一鍵預覽）完全不觸碰磁碟：不建資料夾、不寫報表
+- 每次實際執行都會產生 `actions_log_*.jsonl`，可用「復原操作」或 `undo_actions.py` 還原；移到資源回收桶的檔案無法自動還原
+- EXIF 配對 key 精度只到秒，**連拍照片可能錯配**，連拍素材建議用檔名（stem）配對
+- 相似照片偵測為 O(n²) 比對，建議數千張以內；完全相同的檔案請用「單資料夾去重」
 - Windows CMD 可能顯示中文亂碼（不影響功能）
 - Streamlit UI 設定會自動儲存至 `.streamlit_settings.json`
 - 建議定期備份重要檔案

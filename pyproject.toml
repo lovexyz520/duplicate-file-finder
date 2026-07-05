@@ -1,7 +1,7 @@
 [project]
 name = "duplicate-file-finder"
-version = "0.1.0"
-description = "比對兩個資料夾，找出並移動重複的檔案"
+version = "3.2.0"
+description = "檔案管理工具箱：重複偵測、整理、RAW/JPG 配對、相似照片、復原"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -9,4 +9,13 @@ dependencies = [
     "streamlit>=1.33.0",
     "exifread>=3.0.0",
     "hachoir>=3.2.0",
+    "send2trash>=2.1.0",
+    "pillow>=12.1.0",
+    "pillow-heif>=1.4.0",
+    "imagehash>=4.3.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
 ]

@@ -2,22 +2,13 @@ from __future__ import annotations
 
 import os
 from datetime import datetime
-from typing import Iterable, Mapping
+from typing import Callable, Mapping
 
 from .media_types import MediaFileInfo
 from .metadata import get_image_exif, get_video_metadata
+from .scanner import iter_files
 
-
-def _iter_files(folder: str, recursive: bool) -> Iterable[str]:
-    if recursive:
-        for root, _, filenames in os.walk(folder):
-            for filename in filenames:
-                yield os.path.join(root, filename)
-    else:
-        for filename in os.listdir(folder):
-            path = os.path.join(folder, filename)
-            if os.path.isfile(path):
-                yield path
+ProgressCallback = Callable[[int, int], None]
 
 
 def _category_for_extension(ext: str, preset: Mapping[str, set[str]]) -> str:
@@ -28,20 +19,27 @@ def _category_for_extension(ext: str, preset: Mapping[str, set[str]]) -> str:
     return "OTHERS"
 
 
-def _shot_time_from_mtime(mtime: float) -> datetime:
-    return datetime.fromtimestamp(mtime)
-
-
 def scan_media_folder(
     folder: str,
     recursive: bool,
     preset: Mapping[str, set[str]],
+    min_size: int = 0,
+    include_hidden: bool = True,
+    exclude_dirs: set[str] | None = None,
+    progress: ProgressCallback | None = None,
 ) -> list[MediaFileInfo]:
+    paths = list(iter_files(folder, recursive, include_hidden, exclude_dirs))
+    total = len(paths)
+
     results: list[MediaFileInfo] = []
-    for path in _iter_files(folder, recursive):
+    for index, path in enumerate(paths, start=1):
+        if progress:
+            progress(index, total)
         try:
             stat = os.stat(path)
         except OSError:
+            continue
+        if stat.st_size < min_size:
             continue
         _, ext = os.path.splitext(path)
         category = _category_for_extension(ext, preset)
@@ -62,7 +60,7 @@ def scan_media_folder(
             height = meta.get("height")
 
         if shot_time is None:
-            shot_time = _shot_time_from_mtime(stat.st_mtime)
+            shot_time = datetime.fromtimestamp(stat.st_mtime)
 
         results.append(
             MediaFileInfo(

@@ -1,16 +1,11 @@
 from __future__ import annotations
 
 import os
-import re
-from datetime import datetime
 from typing import Iterable
 
 from .media_types import MediaFileInfo
+from .naming import safe_key_folder
 from .pairing import PairRecord
-
-
-def _safe_key_folder(key: str) -> str:
-    return re.sub(r"[^\w-]", "_", key).strip("_") or "pair"
 
 
 def _key_by_stem(path: str) -> str:
@@ -25,6 +20,8 @@ def _key_by_stem_parent(path: str) -> str:
 
 
 def _key_by_exif(info: MediaFileInfo) -> str | None:
+    # 注意：EXIF 時間精度只到秒，連拍照片會共用同一個 key，
+    # 只能靠排序後依序配對，可能錯配。
     if info.shot_time is None:
         return None
     stamp = info.shot_time.strftime("%Y%m%d%H%M%S")
@@ -90,4 +87,4 @@ def pair_media_files(
 
 
 def pick_pair_folder(key: str, output_folder: str) -> str:
-    return os.path.join(output_folder, "Pairs", _safe_key_folder(key))
+    return os.path.join(output_folder, "Pairs", safe_key_folder(key))

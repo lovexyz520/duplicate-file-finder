@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import os
+from datetime import datetime
 from typing import Any
 
 try:
@@ -15,6 +16,23 @@ except Exception:  # pragma: no cover - optional dependency
     extractMetadata = None
     createParser = None
 
+try:
+    from PIL import Image  # type: ignore
+    from PIL.ExifTags import Base as ExifTags  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    Image = None
+    ExifTags = None
+
+try:
+    import pillow_heif  # type: ignore
+
+    pillow_heif.register_heif_opener()
+    _HEIF_AVAILABLE = True
+except Exception:  # pragma: no cover - optional dependency
+    _HEIF_AVAILABLE = False
+
+_PIL_EXTS = {".heic", ".heif"}
+
 
 def _parse_exif_datetime(value: Any) -> datetime | None:
     if value is None:
@@ -27,9 +45,35 @@ def _parse_exif_datetime(value: Any) -> datetime | None:
         return None
 
 
-def get_image_exif(path: str) -> tuple[datetime | None, str | None]:
-    if exifread is None:
+def _get_exif_via_pil(path: str) -> tuple[datetime | None, str | None]:
+    if Image is None:
         return None, None
+    try:
+        with Image.open(path) as img:
+            exif = img.getexif()
+            if not exif:
+                return None, None
+            ifd = exif.get_ifd(0x8769)  # Exif IFD
+            shot = (
+                _parse_exif_datetime(ifd.get(int(ExifTags.DateTimeOriginal)))
+                or _parse_exif_datetime(ifd.get(int(ExifTags.DateTimeDigitized)))
+                or _parse_exif_datetime(exif.get(int(ExifTags.DateTime)))
+            )
+            model = exif.get(int(ExifTags.Model))
+            camera_model = str(model).strip() if model else None
+            return shot, camera_model
+    except Exception:
+        return None, None
+
+
+def get_image_exif(path: str) -> tuple[datetime | None, str | None]:
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _PIL_EXTS:
+        # exifread 不支援 HEIC/HEIF 容器，改走 Pillow + pillow-heif
+        return _get_exif_via_pil(path)
+
+    if exifread is None:
+        return _get_exif_via_pil(path)
     try:
         with open(path, "rb") as f:
             tags = exifread.process_file(f, details=False, strict=True)
@@ -74,9 +118,9 @@ def get_video_metadata(path: str) -> dict[str, Any]:
         height = metadata.get("height")
         result = {}
         if shot_time:
-            # Normalize to naive local time for consistency with file mtime
+            # 與檔案 mtime 一致：轉為本地時區的 naive datetime
             if shot_time.tzinfo is not None:
-                shot_time = shot_time.astimezone(timezone.utc).replace(tzinfo=None)
+                shot_time = shot_time.astimezone().replace(tzinfo=None)
             result["shot_time"] = shot_time
         if duration:
             result["duration"] = float(duration.total_seconds())

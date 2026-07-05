@@ -3,14 +3,16 @@ from __future__ import annotations
 import os
 import shutil
 from datetime import datetime
-from typing import Mapping
+from typing import Callable, Mapping
 
-from .dupe import group_duplicates
-from .hashers import full_hash, partial_hash
-from .naming import clean_filename, resolve_destination
+from .dupe import group_duplicates, pick_keep_for_group
+from .naming import DestinationResolver, clean_filename
 from .report import write_duplicates_report, write_organize_report
 from .scanner import scan_folder
-from .types import DuplicateAction, DuplicateMatch, FileInfo, OrganizeAction
+from .types import DuplicateAction, DuplicateMatch, OrganizeAction
+
+# progress(stage, done, total)，stage: "hash" | "move"
+StageProgress = Callable[[str, int, int], None]
 
 DEFAULT_PRESET: Mapping[str, set[str]] = {
     "Docs": {".doc", ".docx", ".txt", ".md"},
@@ -23,25 +25,6 @@ DEFAULT_PRESET: Mapping[str, set[str]] = {
     "Code": {".py", ".js", ".json", ".ts", ".html", ".css", ".yml", ".yaml"},
     "Others": set(),
 }
-
-
-def _pick_keep_for_group(
-    group: list[FileInfo],
-    strategy: str,
-    prefer_path: str | None,
-) -> FileInfo:
-    if strategy == "latest":
-        return max(group, key=lambda f: f.mtime)
-    if strategy == "earliest":
-        return min(group, key=lambda f: f.ctime)
-    if strategy == "prefer-path" and prefer_path:
-        prefix = os.path.abspath(prefer_path)
-        with_sep = prefix + os.sep
-        for info in group:
-            path = os.path.abspath(info.path)
-            if path == prefix or path.startswith(with_sep):
-                return info
-    return group[0]
 
 
 def _category_for_extension(ext: str, preset: Mapping[str, set[str]]) -> str:
@@ -69,16 +52,26 @@ def organize(
     clean_remove_special: bool = False,
     conflict_suffix_width: int = 3,
     preset: Mapping[str, set[str]] | None = None,
+    min_size: int = 0,
+    include_hidden: bool = True,
+    exclude_dirs: set[str] | None = None,
+    write_reports: bool = True,
+    progress: StageProgress | None = None,
 ) -> tuple[
     int,
     list[DuplicateMatch],
     list[DuplicateAction],
     list[OrganizeAction],
 ]:
-    files = scan_folder(source_folder, recursive)
-    os.makedirs(output_folder, exist_ok=True)
+    """整理來源資料夾。dry_run 時不觸碰磁碟（不建資料夾、不移動、不寫報表）。"""
+    files = scan_folder(
+        source_folder,
+        recursive,
+        min_size=min_size,
+        include_hidden=include_hidden,
+        exclude_dirs=exclude_dirs,
+    )
     duplicates_dir = os.path.join(output_folder, "Duplicates")
-    os.makedirs(duplicates_dir, exist_ok=True)
 
     preset_map = preset or DEFAULT_PRESET
     partial_bytes = max(partial_size_mb, 1) * 1024 * 1024
@@ -86,50 +79,64 @@ def organize(
     duplicate_matches: list[DuplicateMatch] = []
     duplicate_actions: list[DuplicateAction] = []
     moved_to_duplicates: set[str] = set()
+    resolver = DestinationResolver()
+
+    def _clean(filename: str) -> str:
+        if not clean_names:
+            return filename
+        return clean_filename(
+            filename,
+            remove_copy_suffix=clean_copy_suffix,
+            normalize_space=clean_normalize_space,
+            remove_special=clean_remove_special,
+        )
 
     if not skip_duplicates:
+        hash_progress = None
+        if progress:
+            hash_progress = lambda done, total: progress("hash", done, total)  # noqa: E731
         groups = group_duplicates(
             files,
             partial_bytes=partial_bytes,
             full_hash_algo=full_hash_algo,
+            progress=hash_progress,
         )
         for group in groups:
-            keep = _pick_keep_for_group(group, dupe_strategy, prefer_path)
-            for info in group:
+            keep = pick_keep_for_group(
+                [g.info for g in group], dupe_strategy, prefer_path
+            )
+            for grouped in group:
+                info = grouped.info
                 if info.path == keep.path:
                     continue
-                ph = partial_hash(info.path, partial_bytes)
-                fh = full_hash(info.path, algo=full_hash_algo)
-                if ph is None or fh is None:
-                    continue
 
-                filename = os.path.basename(info.path)
-                if clean_names:
-                    filename = clean_filename(
-                        filename,
-                        remove_copy_suffix=clean_copy_suffix,
-                        normalize_space=clean_normalize_space,
-                        remove_special=clean_remove_special,
-                    )
-
-                desired_dest, dest, name_conflict = resolve_destination(
+                filename = _clean(os.path.basename(info.path))
+                desired_dest, dest, name_conflict = resolver.resolve(
                     duplicates_dir,
                     filename,
                     conflict_suffix_width,
                 )
 
-                action = "preview" if dry_run else "moved"
+                action = "preview"
+                error = None
                 if not dry_run:
-                    shutil.move(info.path, dest)
+                    try:
+                        os.makedirs(duplicates_dir, exist_ok=True)
+                        shutil.move(info.path, dest)
+                        action = "moved"
+                    except Exception as exc:  # noqa: BLE001 - 逐檔隔離錯誤
+                        action = "failed"
+                        error = str(exc)
 
-                moved_to_duplicates.add(info.path)
+                if action != "failed":
+                    moved_to_duplicates.add(info.path)
 
                 duplicate_matches.append(
                     DuplicateMatch(
                         original=keep,
                         duplicate=info,
-                        partial_hash=ph,
-                        full_hash=fh,
+                        partial_hash=grouped.partial_hash,
+                        full_hash=grouped.full_hash,
                     )
                 )
                 duplicate_actions.append(
@@ -142,41 +149,42 @@ def organize(
                         name_conflict=name_conflict,
                         action=action,
                         strategy=dupe_strategy,
-                        partial_hash=ph,
-                        full_hash=fh,
+                        partial_hash=grouped.partial_hash,
+                        full_hash=grouped.full_hash,
+                        error=error,
                     )
                 )
 
     organize_actions: list[OrganizeAction] = []
-    for info in files:
-        if info.path in moved_to_duplicates:
-            continue
+    remaining = [f for f in files if f.path not in moved_to_duplicates]
+    total_remaining = len(remaining)
+    for index, info in enumerate(remaining, start=1):
+        if progress:
+            progress("move", index, total_remaining)
         category = _category_for_extension(info.ext, preset_map)
         if time_partition:
             month = datetime.fromtimestamp(info.mtime).strftime("%Y-%m")
             target_dir = os.path.join(output_folder, month, category)
         else:
             target_dir = os.path.join(output_folder, category)
-        os.makedirs(target_dir, exist_ok=True)
 
-        filename = os.path.basename(info.path)
-        if clean_names:
-            filename = clean_filename(
-                filename,
-                remove_copy_suffix=clean_copy_suffix,
-                normalize_space=clean_normalize_space,
-                remove_special=clean_remove_special,
-            )
-
-        desired_dest, dest, name_conflict = resolve_destination(
+        filename = _clean(os.path.basename(info.path))
+        desired_dest, dest, name_conflict = resolver.resolve(
             target_dir,
             filename,
             conflict_suffix_width,
         )
 
-        action = "preview" if dry_run else "moved"
+        action = "preview"
+        error = None
         if not dry_run:
-            shutil.move(info.path, dest)
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+                shutil.move(info.path, dest)
+                action = "moved"
+            except Exception as exc:  # noqa: BLE001 - 逐檔隔離錯誤
+                action = "failed"
+                error = str(exc)
 
         organize_actions.append(
             OrganizeAction(
@@ -186,14 +194,39 @@ def organize(
                 category=category,
                 action=action,
                 name_conflict=name_conflict,
+                error=error,
             )
         )
 
-    if duplicate_matches:
-        dupe_report = os.path.join(duplicates_dir, "duplicates_report.csv")
-        write_duplicates_report(duplicate_matches, dupe_report, actions=duplicate_actions)
-
-    organize_report = os.path.join(output_folder, "organize_report.csv")
-    write_organize_report(organize_actions, organize_report)
+    if write_reports and not dry_run:
+        if duplicate_matches:
+            dupe_report = os.path.join(duplicates_dir, "duplicates_report.csv")
+            write_duplicates_report(
+                duplicate_matches, dupe_report, actions=duplicate_actions
+            )
+        organize_report = os.path.join(output_folder, "organize_report.csv")
+        write_organize_report(organize_actions, organize_report)
 
     return len(files), duplicate_matches, duplicate_actions, organize_actions
+
+
+def organize_actions_to_records(actions: list[OrganizeAction]) -> list[dict]:
+    from .oplog import make_record
+
+    records = []
+    for action in actions:
+        if action.action == "preview":
+            continue
+        records.append(
+            make_record(
+                op="move",
+                source=action.source_path,
+                dest=action.dest_path,
+                status=action.action,
+                kind="organize",
+                error=action.error,
+                category=action.category,
+                name_conflict=action.name_conflict,
+            )
+        )
+    return records

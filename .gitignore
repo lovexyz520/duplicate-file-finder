@@ -26,6 +26,8 @@ strategy_test/
 organized_output/
 pair_output/
 photo_output/
+duplicates_output/
+similar_output/
 
 # Reports (generated)
 duplicates_report.csv
@@ -33,6 +35,8 @@ organize_report.csv
 pairs.csv
 orphans.csv
 actions_log.jsonl
+actions_log_*.jsonl
+similar_groups.csv
 
 # Windows junk files
 nul

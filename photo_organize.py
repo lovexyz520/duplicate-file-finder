@@ -11,8 +11,8 @@ from core import (
     write_duplicates_report,
     write_pairs_report,
 )
+from core import default_log_path, write_actions_log
 from rules_presets import PHOTO_PRESET
-from core.photo_executor import write_actions_log
 
 
 def main() -> None:
@@ -82,6 +82,10 @@ def main() -> None:
     print(f"重複檔案：{len(plan.duplicate_matches)}")
     print(f"整理項目：{len(plan.photo_actions)}")
 
+    if args.dry_run:
+        print("（預覽模式：未移動檔案、未輸出報表）")
+        return
+
     pairs_path = os.path.join(args.output, "pairs.csv")
     orphans_path = os.path.join(args.output, "orphans.csv")
     pair_records = [PairRecord(key=p[0], jpg_path=p[1], raw_path=p[2]) for p in plan.pairs]
@@ -89,23 +93,31 @@ def main() -> None:
     print(f"pairs.csv：{pairs_path}")
     print(f"orphans.csv：{orphans_path}")
 
-    duplicates_path = os.path.join(args.output, "duplicates_report.csv")
-    if plan.duplicate_matches:
-        write_duplicates_report(plan.duplicate_matches, duplicates_path, plan.duplicate_actions)
-        print(f"duplicates_report.csv：{duplicates_path}")
-
-    if args.dry_run:
-        return
-
     completed_duplicates = execute_duplicate_actions(plan.duplicate_actions, dry_run=False)
     completed_actions = execute_photo_actions(
         plan.photo_actions,
         dry_run=False,
         move=args.move,
     )
-    log_path = os.path.join(args.output, "actions_log.jsonl")
+
+    if plan.duplicate_matches:
+        duplicates_path = os.path.join(args.output, "duplicates_report.csv")
+        write_duplicates_report(plan.duplicate_matches, duplicates_path, completed_duplicates)
+        print(f"duplicates_report.csv：{duplicates_path}")
+
+    failures = [a for a in completed_actions if a.action == "failed"] + [
+        a for a in completed_duplicates if a.action == "failed"
+    ]
+    if failures:
+        print(f"\n失敗 {len(failures)} 筆:")
+        for a in failures:
+            src = getattr(a, "source_path", None) or a.duplicate.path
+            print(f"[失敗] {src}: {a.error}")
+
+    log_path = default_log_path(args.output)
     write_actions_log(completed_actions, completed_duplicates, log_path)
-    print(f"actions_log.jsonl：{log_path}")
+    print(f"操作 log：{log_path}")
+    print(f"還原指令: uv run undo_actions.py \"{log_path}\"")
 
 
 if __name__ == "__main__":

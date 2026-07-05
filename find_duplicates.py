@@ -8,53 +8,38 @@ Duplicate File Finder - 重複檔案搜尋工具
 2. 先比對檔案大小，大小不同則跳過（效能優化）
 3. 先做 partial hash（前/後 1MB 的 xxhash）
 4. partial hash 相同時做完整 SHA256
-5. 將 folder2 中的重複檔案移動到輸出資料夾
+5. 將 folder2 中的重複檔案移動到輸出資料夾（或資源回收桶）
 
 使用方式：
     uv run find_duplicates.py [folder1] [folder2] [-o OUTPUT] [-r] [--dry-run]
         [--partial-size-mb N] [--full-hash sha256|xxhash64]
         [--keep-strategy folder1|folder2|latest|earliest|prefer-path]
         [--prefer-path PATH] [--move-scope folder2|both]
+        [--to-trash] [--min-size-kb N] [--exclude-dirs a,b] [--no-hidden]
+
+執行後會輸出 actions_log_*.jsonl，可用 undo_actions.py 還原。
 """
+
+from __future__ import annotations
 
 import argparse
 import os
 
-from core import find_duplicates_between, move_duplicates, scan_folder, write_duplicates_report
+from core import (
+    check_overlapping,
+    default_log_path,
+    duplicate_actions_to_records,
+    find_duplicates_between,
+    move_duplicates,
+    scan_folder,
+    write_duplicates_report,
+    write_oplog,
+)
 
 # 預設資料夾路徑
 DEFAULT_FOLDER1 = 'folder1'
 DEFAULT_FOLDER2 = 'folder2'
 DEFAULT_OUTPUT = 'output_folder'
-
-# 舊路徑參考：
-# folder1 = 'E://待整理 poto//mobile phone//手機備份//photo'
-# folder2 = 'E://待整理 poto//mobile phone//手機備份//photo'
-# output_folder = 'E://待整理 poto//mobile phone//手機備份//output_folder'
-
-
-def check_overlapping_folders(folder1, folder2):
-    """檢查兩個資料夾是否有重疊
-
-    Returns:
-        str: 重疊類型 ('same', 'folder1_contains_folder2', 'folder2_contains_folder1', None)
-    """
-    path1 = os.path.abspath(folder1)
-    path2 = os.path.abspath(folder2)
-
-    if path1 == path2:
-        return 'same'
-
-    # 確保路徑結尾有分隔符，避免誤判（如 /foo 和 /foobar）
-    path1_with_sep = path1 + os.sep
-    path2_with_sep = path2 + os.sep
-
-    if path2.startswith(path1_with_sep):
-        return 'folder1_contains_folder2'
-    if path1.startswith(path2_with_sep):
-        return 'folder2_contains_folder1'
-
-    return None
 
 
 def main():
@@ -99,6 +84,27 @@ def main():
         help="移動範圍（預設: folder2，只移動 folder2 的檔案）",
     )
     parser.add_argument(
+        "--to-trash",
+        action="store_true",
+        help="重複檔案移到資源回收桶（取代移到輸出資料夾）",
+    )
+    parser.add_argument(
+        "--min-size-kb",
+        type=int,
+        default=0,
+        help="略過小於此大小的檔案（KB，預設: 0 = 不過濾）",
+    )
+    parser.add_argument(
+        "--exclude-dirs",
+        default="",
+        help="排除的資料夾名稱（逗號分隔，例：.git,node_modules）",
+    )
+    parser.add_argument(
+        "--no-hidden",
+        action="store_true",
+        help="略過隱藏檔案與資料夾（以 . 開頭）",
+    )
+    parser.add_argument(
         "--clean-names",
         action="store_true",
         help="啟用檔名清理（包含移除(1)/(2)、空白正規化、移除特殊字元、衝突補 _001）",
@@ -140,7 +146,7 @@ def main():
         return
 
     # 檢查資料夾是否重疊
-    overlap = check_overlapping_folders(args.folder1, args.folder2)
+    overlap = check_overlapping(args.folder1, args.folder2)
     if overlap == 'same':
         print("錯誤: folder1 和 folder2 是同一個資料夾")
         return
@@ -157,8 +163,14 @@ def main():
             print("已取消")
             return
 
-    files1 = scan_folder(args.folder1, args.recursive)
-    files2 = scan_folder(args.folder2, args.recursive)
+    exclude_dirs = {d.strip() for d in args.exclude_dirs.split(",") if d.strip()} or None
+    scan_kwargs = dict(
+        min_size=args.min_size_kb * 1024,
+        include_hidden=not args.no_hidden,
+        exclude_dirs=exclude_dirs,
+    )
+    files1 = scan_folder(args.folder1, args.recursive, **scan_kwargs)
+    files2 = scan_folder(args.folder2, args.recursive, **scan_kwargs)
 
     print(f"資料夾 1: {len(files1)} 個檔案")
     print(f"資料夾 2: {len(files2)} 個檔案")
@@ -201,11 +213,13 @@ def main():
         clean_normalize_space=clean_normalize_space,
         clean_remove_special=clean_remove_special,
         conflict_suffix_width=conflict_width,
+        to_trash=args.to_trash,
     )
 
     moves: list[tuple[str, str]] = []
     keeps: list[str] = []
     conflicts: list[tuple[str, str, str]] = []
+    failures: list[tuple[str, str]] = []
 
     for op in operations:
         if op.action == "kept_by_strategy":
@@ -216,10 +230,15 @@ def main():
             src = op.original.path
         else:
             src = op.duplicate.path
-        dest = op.move_path or ""
+
+        if op.action == "failed":
+            failures.append((src, op.error or ""))
+            continue
+
+        dest = op.move_path or ("(資源回收桶)" if args.to_trash else "")
         moves.append((src, dest))
         if op.name_conflict and op.desired_move_path:
-            conflicts.append((src, op.desired_move_path, dest))
+            conflicts.append((src, op.desired_move_path, op.move_path or ""))
 
     if keeps:
         print("\n保留清單:")
@@ -239,9 +258,20 @@ def main():
         for src, desired, final in conflicts:
             print(f"[衝突] {src} -> {desired} (改名為 {final})")
 
+    if failures:
+        print("\n失敗清單:")
+        for src, error in failures:
+            print(f"[失敗] {src}: {error}")
+
     report_path = args.report or os.path.join(args.output, "duplicates_report.csv")
-    write_duplicates_report(matches, report_path, actions=operations)
-    print(f"報表已輸出: {report_path}")
+    if not args.dry_run:
+        write_duplicates_report(matches, report_path, actions=operations)
+        print(f"報表已輸出: {report_path}")
+
+        log_path = default_log_path(args.output)
+        write_oplog(duplicate_actions_to_records(operations), log_path)
+        print(f"操作 log: {log_path}")
+        print(f"還原指令: uv run undo_actions.py \"{log_path}\"")
 
     kept_count = len(keeps)
     move_count = len(moves)
@@ -250,11 +280,12 @@ def main():
         f"\n摘要: 重複檔案 {len(matches)} 個，"
         f"保留 {kept_count} 個，"
         f"{'預覽移動' if args.dry_run else '移動'} {move_count} 個，"
-        f"命名衝突 {conflict_count} 個"
+        f"命名衝突 {conflict_count} 個，"
+        f"失敗 {len(failures)} 個"
     )
 
     if not args.dry_run:
-        print(f"共移動 {moved_count} 個重複檔案")
+        print(f"共處理 {moved_count} 個重複檔案")
 
 
 if __name__ == "__main__":
