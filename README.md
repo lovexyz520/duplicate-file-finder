@@ -463,7 +463,7 @@ uv run pytest tests
 - 預覽（dry-run / 一鍵預覽）完全不觸碰磁碟：不建資料夾、不寫報表
 - 每次實際執行都會產生 `actions_log_*.jsonl`，可用「復原操作」或 `undo_actions.py` 還原；移到資源回收桶的檔案無法自動還原
 - EXIF 配對 key 精度只到秒，**連拍照片可能錯配**，連拍素材建議用檔名（stem）配對
-- 相似照片偵測為 O(n²) 比對，建議數千張以內；完全相同的檔案請用「單資料夾去重」
+- 相似照片偵測以 BK-tree 做鄰近搜尋，數萬張也可處理（主要時間花在計算 hash）；完全相同的檔案請用「單資料夾去重」
 - Windows CMD 可能顯示中文亂碼（不影響功能）
 - Streamlit UI 設定會自動儲存至 `.streamlit_settings.json`
 - 建議定期備份重要檔案

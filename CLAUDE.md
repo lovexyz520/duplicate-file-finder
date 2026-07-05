@@ -50,7 +50,7 @@ duplicate-file-finder/
 │   ├── photo_executor.py     # 攝影素材執行 + oplog 轉換
 │   ├── report.py             # CSV 報表（寫檔 + in-memory 字串供下載）
 │   ├── scanner.py            # 檔案掃描 + 過濾（min_size/hidden/exclude_dirs）
-│   ├── similar.py            # 相似照片偵測（imagehash phash + union-find）
+│   ├── similar.py            # 相似照片偵測（phash + BK-tree + union-find）
 │   ├── types.py              # 資料結構（action 均含 error 欄位）
 │   ├── undo.py               # plan_undo / execute_undo（LIFO、模擬 fs 狀態）
 │   └── __init__.py           # 模組匯出 + __version__
@@ -90,7 +90,11 @@ duplicate-file-finder/
 
 ### 相似照片
 
-`imagehash.phash` + Hamming distance 門檻 + union-find 分群。O(n²)，適合數千張以內。
+`imagehash.phash` + BK-tree 範圍查詢（Hamming distance）+ union-find 分群。
+效能關鍵：hash 轉 int 用 `bit_count()` 算距離（比 numpy 快兩個數量級）、
+相同 hash 先合併、邊插入邊查詢（總走訪量減半）。20k 張隨機最壞情況約 11s，
+實際照片叢集分佈更快；整體瓶頸在讀圖算 hash（有 progress 回報）。
+`BKTree` 與 `group_hashes` 從 `core/similar.py` 匯出，測試含暴力法對照。
 
 ### 配對邏輯
 
